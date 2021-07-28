@@ -32,7 +32,7 @@ Note: for cropping, first load the mask
 
 """
 import h5py
-from interfaces import *
+from .interfaces import *
 import math
 import matplotlib
 import numpy as np
