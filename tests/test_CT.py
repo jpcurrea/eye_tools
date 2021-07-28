@@ -1,6 +1,7 @@
 """Test script for processing a CT stack.
 """
-from analysis_tools import *
+# from analysis_tools import *
+from eye_tools import *
 
 
 PIXEL_SIZE = 4.50074

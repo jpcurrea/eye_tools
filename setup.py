@@ -19,5 +19,6 @@ setup(name="eye_tools",
           'scikit-image',
           'scikit-learn',
           'scipy',
+          'h5py'
       ],
       zip_safe=False)
