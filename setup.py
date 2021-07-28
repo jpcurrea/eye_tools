@@ -9,6 +9,10 @@ setup(name="eye_tools",
       author_email='johnpaulcurrea@gmail.com',
       license='MIT',
       packages=['eye_tools'],
+      package_data={
+          'test_layer': ['*.jpg'],
+          'test_stack': ['*.JPG']},
+      include_package_data=True,
       install_requires=[
           'numpy',
           'scipy',
