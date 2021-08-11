@@ -32,7 +32,7 @@ Note: for cropping, first load the mask
 
 """
 import h5py
-from interfaces import *
+from .interfaces import *
 import math
 import matplotlib
 import numpy as np
@@ -2178,7 +2178,7 @@ class Stack():
             print_progress(num + 1, len(self.fns))
         print()
         
-    def load_masks(self, mask_fn=None, arr=None):
+    def load_masks(self, mask_fn=None, mask_arr=None):
         """Load the masks using either their mask file or array.
 
 
@@ -2191,7 +2191,7 @@ class Stack():
         """
         print("loading masks: ")
         for num, layer in enumerate(self.layers):
-            layer.load_mask(mask_fn=mask_fn, arr=arr)
+            layer.load_mask(mask_fn=mask_fn, mask_arr=mask_arr)
             print_progress(num + 1, len(self.fns))
         print()
 
@@ -2418,7 +2418,7 @@ class EyeStack(Stack):
         assert len(self.layers) > 0, (
             f"No layers loaded yet. Try running {self.load}.")
         # load the boolean masks
-        self.load_masks(mask_fn=self.eye_mask_fn, arr=self.eye_mask)
+        self.load_masks(mask_fn=self.eye_mask_fn, mask_arr=self.eye_mask)
         new_layers = []
         for layer in self.layers:
             new_layers += [layer.crop_eye()]
