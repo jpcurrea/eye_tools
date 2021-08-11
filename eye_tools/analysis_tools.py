@@ -32,7 +32,7 @@ Note: for cropping, first load the mask
 
 """
 import h5py
-from .interfaces import *
+from interfaces import *
 import math
 import matplotlib
 import numpy as np
@@ -210,12 +210,18 @@ class SphereFit():
         # solve using numpy
         solution, sum_sq_residuals, rank, singular = np.linalg.lstsq(
             coefficients, outcome, rcond=None)
+        breakpoint()
         # get radius
+        # from the model:
+        x0, y0, z0, var = solution
+        self.radius_model = np.sqrt(var + x0**2 + y**2 + z**2)
+        # empirically:
         self.center = solution[:-1, 0]
         self.radii = np.linalg.norm(self.pts - self.center[np.newaxis], axis=-1)
         self.radius = np.mean(self.radii)
         # center the pts 
         self.pts -= self.center
+        self.center[:] = 0
         # rotate the points about the center until com is ideal
         self.center_com()
         # then perform spherical transformation
@@ -249,6 +255,216 @@ class SphereFit():
         inclination = np.arccos(zs / radius)
         azimuth = np.arctan2(ys, xs)
         self.polar = np.array([inclination, azimuth, radius]).T
+
+
+class SphereFit():
+    """Fit sphere to points to find center and radius.
+
+
+    Attributes
+    ----------
+    pts : np.ndarray, shape (N, 3)
+        The points to fit the sphere to.
+    center : np.ndarray, len (3)
+        The resulting center point.
+    radius : float
+        The average distance of pts to center.
+    """
+    def __init__(self, pts):
+        """Fit sphere equation to 3D points using scipy.optimize.minimize.
+
+
+        Parameters
+        ----------
+        pts : np.ndarray, shape (N, 3)
+            The array of 3D points to be fitted.
+        """
+        self.pts = np.copy(pts)
+        # store the original pts for posterity
+        self.original_pts = np.copy(self.pts)
+        self.xs, self.ys, self.zs = self.pts.T
+        # find the point closest to the center of the points
+        # construct the outcome matrix
+        outcome = (self.pts ** 2).sum(1)
+        outcome = outcome[:, np.newaxis]
+        # construct coefficient matrix
+        coefficients = np.ones((len(self.xs), 4))
+        coefficients[:, :3] = self.pts * 2
+        # solve using numpy
+        solution, sum_sq_residuals, rank, singular = np.linalg.lstsq(
+            coefficients, outcome, rcond=None)
+        # get radius
+        # from the model:
+        x0, y0, z0, var = solution
+        self.radius_model = np.sqrt(var + x0**2 + y0**2 + z0**2)
+        # empirically:
+        self.center = solution[:-1, 0]
+        self.radii = np.linalg.norm(self.pts - self.center[np.newaxis], axis=-1)
+        self.radius = np.mean(self.radii)
+        # center the pts 
+        self.pts -= self.center
+        self.center[:] = 0
+        # rotate the points about the center until com is ideal
+        self.center_com()
+        # then perform spherical transformation
+        self.get_polar()
+
+    def center_com(self):
+        """Rotate points using the center of mass."""
+        # 1. find center of mass
+        com = self.pts.mean(0)
+        # 2. rotate com along x axis (com[0]) until z (com[2]) = 0
+        ang1 = np.arctan2(com[2], com[1])
+        com1 = rotate(com, ang1, axis=0)
+        rot1 = rotate(self.pts, ang1, axis=0).T
+        # 3. rotate com along z axis (com[2]) until y (com[1]) = 0
+        ang2 = np.arctan2(com1[1], com1[0])
+        rot2 = rotate(rot1, ang2, axis=2).T
+        self.pts = rot2
+
+    def get_polar(self):
+        """Transform self.pts to polar coordinates using sphere center.
+
+
+        Attributes
+        ----------
+        polar : np.ndarray, shape=(N,3)
+            The list of coordinates transformed into spherical coordinates.
+        """
+        xs, ys, zs = self.pts.T
+        # get polar transformation
+        self.radii = np.linalg.norm(self.pts, axis=-1)
+        self.inclination = np.arccos(zs / self.radii)
+        self.azimuth = np.arctan2(ys, xs)
+        self.polar = np.array([self.inclination, self.azimuth, self.radius]).T
+
+    def rasterize(self, image_size=10**4, weights=None):
+        """Rasterize coordinates onto a grid defined by min and max vals.
+
+
+        Parameters
+        ----------
+        image_size : int, default=1e4
+            The number of pixels in the image.
+        weights : list, shape=(N, 1), default=None
+            Optional weights associated with each point.
+
+        Returns
+        -------
+        raster : np.ndarray
+            The 2D histogram of the points, optionally weighted by self.vals.
+        (xs, ys) : tuple
+            The x and y coordinates marking the boundaries of each pixel. 
+            Useful for rendering as a pyplot.pcolormesh.
+        """
+        arr = self.polar
+        x, y = arr.T[axes]
+        # get coordinate ranges for the appropriate aspect ratio
+        x_range = x.max() - x.min()
+        y_range = y.max() - y.min()
+        # figure out side lengths needed for input image size
+        ratio = y_range / x_range
+        x_len = int(np.round(np.sqrt(image_size/ratio)))
+        # get x and y ranges corresponding to image size
+        xs = np.linspace(x.min(), x.max(), x_len)
+        self.raster_pixel_length = xs[1] - xs[0]
+        ys = np.arange(y.min(), y.max(), self.raster_pixel_length)
+        if weights is None:
+            # a simple 2D histogram of the x and y coordinates
+            avg = np.histogram2d(x, y, bins=(xs, ys))[0] # histogram image
+        else:
+            # a weighted 2D histogram if values were provided for 
+            avg = np.histogram2d(x, y, bins=(xs, ys), weights = weights)[0]
+        self.raster = avg
+        # use raster pixel length to get the x and y axes for the raster image
+        xs = xs[:-1] + (self.raster_pixel_length / 2.)
+        ys = ys[:-1] + (self.raster_pixel_length / 2.)
+        self.xvals, self.yvals = xs, ys
+        return self.raster, (xs, ys)
+
+    def fit_surface(self, image_size=1e4):
+        """Cubic interpolate surface of one axis using the other two.
+
+
+        Parameters
+        ----------
+        image_size : int, default=1e4
+            The number of pixels in the image.
+
+        Attributes
+        ----------
+        avg : array_like
+            The rolling average
+        """
+        arr = self.polar
+        x, y, z = arr.T
+        x_range = x.max() - x.min()
+        y_range = y.max() - y.min()
+        # figure out side lengths needed for input image size
+        ratio = y_range / x_range
+        x_len = int(np.round(np.sqrt(image_size/ratio)))
+        y_len = int(np.round(ratio * x_len))
+        # reduce data using a 2D rolling average
+        # xs = np.arange(x.min(), x.max(), pixel_length)
+        # ys = np.arange(y.min(), y.max(), pixel_length)
+        xs = np.linspace(x.min(), x.max(), x_len)
+        ys = np.linspace(y.min(), y.max(), y_len)
+        avg = []
+        for col_num, (x1, x2) in enumerate(zip(xs[:-1], xs[1:])):
+            col = []
+            in_column = np.logical_and(x >= x1, x < x2)
+            in_column = arr[in_column]
+            for row_num, (y1, y2) in enumerate(zip(ys[:-1], ys[1:])):
+                in_row = np.logical_and(
+                    in_column[:, 1] >= y1, in_column[:, 1] < y2)
+                if any(in_row):
+                    avg += [np.mean(in_column[in_row], axis=0)]
+                    # vals = in_column[in_row][:, -1]
+                    # xvals, yvals, zvals = in_column[in_row].T
+                    # avg += [[x1, y1, np.median(in_column[in_row][:, -1])]]
+            print_progress(col_num, len(xs) - 1)
+        print()
+        avg = np.array(avg)
+        # filter outlier points by using bootstraped 95% confidence band (not of the mean)
+        low, high = np.percentile(avg[:, 2], [.5, 99.5])
+        self.avg = avg[np.logical_and(avg[:, 2] >= low, avg[:, 2] < high)]
+        avg, (xs, ys) = self.rasterize(image_size=image_size, weights=self.radii)
+        breakpoint()
+        self.avg_x, self.avg_y, self.avg_z = self.avg.T
+
+    def surface_predict(self, xvals=None, yvals=None, image_size=1e4):
+        """Find the approximate zvalue given arbitrary x and y values."""
+        if "avg_x" not in dir(self):
+            self.fit_surface(image_size=image_size)
+        if (xvals is None) or (yvals is None):
+            arr = self.polar
+            xvals, yvals, zvals = arr.T
+        points = np.array([xvals, yvals]).T
+        self.surface = interpolate.griddata(
+            self.avg[:, :2], self.avg_z, points, method='cubic')
+        return self.surface
+
+    def get_polar_cross_section(self, thickness=.1, pixel_length=.01):
+        """Find best fitting surface of radii using phis and thetas."""
+        # self.fit_surface(mode='polar', pixel_length=pixel_length)
+        self.surface_predict()
+        # find distance of datapoints from surface (ie. residuals)
+        self.residuals = self.radii - self.surface
+        # choose points within 'thickness' proportion of residuals
+        self.cross_section_thickness = np.percentile(
+            abs(self.residuals), thickness * 100)
+        self.surface_lower_bound = self.surface - self.cross_section_thickness
+        self.surface_upper_bound = self.surface + self.cross_section_thickness
+        cross_section_inds = np.logical_and(
+            self.radii <= self.surface_upper_bound,
+            self.radii > self.surface_lower_bound)
+        self.cross_section = self[cross_section_inds]
+
+    def save(self, fn):
+        """Save using pickle."""
+        with open(fn, "wb") as pickle_file:
+            pickle.dump(self, pickle_file)
+
 
 
 def colorbar_histogram(colorvals, vmin, vmax, ax=None, bin_number=100,
@@ -564,14 +780,14 @@ class Points():
 
         Attributes
         ----------
-        surface : array_like
-            The resulting surface.
+        avg : array_like
+            The rolling average
         """
         if polar:
             arr = self.polar
         else:
             arr = self.pts
-
+        arr = self.polar
         x, y, z = arr.T
         x_range = x.max() - x.min()
         y_range = y.max() - y.min()
@@ -594,31 +810,33 @@ class Points():
                     in_column[:, 1] >= y1, in_column[:, 1] < y2)
                 if any(in_row):
                     avg += [np.mean(in_column[in_row], axis=0)]
+                    # vals = in_column[in_row][:, -1]
+                    # xvals, yvals, zvals = in_column[in_row].T
+                    # avg += [[x1, y1, np.median(in_column[in_row][:, -1])]]
             print_progress(col_num, len(xs) - 1)
         print()
         avg = np.array(avg)
         # filter outlier points by using bootstraped 95% confidence band (not of the mean)
         low, high = np.percentile(avg[:, 2], [.5, 99.5])
-        avg = avg[np.logical_and(avg[:, 2] >= low, avg[:, 2] < high)]
-        avg_x, avg_y, avg_z = avg.T
-        # interpolate through avg to get 'cross section' using
-        # bivariate spline (bisplrep)
-        # tck = interpolate.bisplrep(avg_x, avg_y, avg_z, s=0)
-        interp_func = interpolate.interp2d(avg_x, avg_y, avg_z, kind='cubic')
-        # import pdb
-        # pdb.set_trace()
-        z_new = []
-        for num, (xx, yy) in enumerate(zip(x, y)):
-            # z_new += [interpolate.bisplev(xx, yy, tck)]
-            z_new.append(interp_func(xx, yy))
-            print_progress(num, len(x))
-        print()
-        self.surface = np.array(z_new)[:, 0]
+        self.avg = avg[np.logical_and(avg[:, 2] >= low, avg[:, 2] < high)]
+        self.avg_x, self.avg_y, self.avg_z = self.avg.T
+
+    def surface_predict(self, xvals=None, yvals=None, image_size=1e4):
+        """Find the approximate zvalue given arbitrary x and y values."""
+        if "avg_x" not in dir(self):
+            self.fit_surface(image_size=image_size)
+        if (xvals is None) or (yvals is None):
+            arr = self.polar
+            xvals, yvals, zvals = arr.T
+        points = np.array([xvals, yvals]).T
+        self.surface = interpolate.griddata(
+            self.avg[:, :2], self.avg_z, points, method='cubic')
+        return self.surface
 
     def get_polar_cross_section(self, thickness=.1, pixel_length=.01):
         """Find best fitting surface of radii using phis and thetas."""
         # self.fit_surface(mode='polar', pixel_length=pixel_length)
-        self.fit_surface(polar=True)
+        self.surface_predict()
         # find distance of datapoints from surface (ie. residuals)
         self.residuals = self.radii - self.surface
         # choose points within 'thickness' proportion of residuals
@@ -1574,11 +1792,6 @@ class Eye(Layer):
         __orientations : np.ndarray
             2D image of spatial orientations corresponding to the reciprocal 
             space of the 2D FFT.
-        __reciprocal : np.ndarray
-            2D reciprocal image of self.image, correcting for the natural 
-            1/(f^2) distribution of spatial frequencies and the low horizontal
-            and vertical spatial frequencies corresponding to the vertical
-            and horizontal boundaries.
         __fundamental_frequencies : float
             The set of spatial frequencies determined by the peak frequencies 
             in the reciprocal image.
@@ -1601,6 +1814,11 @@ class Eye(Layer):
             2D indices of the N ommatidia with shape N x 2.
         ommatidia : np.ndarray
             2D coordinates of N ommatidia with shape N x 2.
+        reciprocal : np.ndarray
+            2D reciprocal image of self.image, correcting for the natural 
+            1/(f^2) distribution of spatial frequencies and the low horizontal
+            and vertical spatial frequencies corresponding to the vertical
+            and horizontal boundaries.
         """
         assert self.eye_outline is not None, (
             f"first run {self.get_eye_dimensions}")
@@ -1622,24 +1840,31 @@ class Eye(Layer):
         i = self.__orientations < 0    # indices of the negative half
         self.__orientations[i] = self.__orientations[i] + np.pi # make positive
         # the reciprocal image is the magnitude of the frequency shifted 2D FFT
-        self.__reciprocal = abs(fft_shifted)
+        self.reciprocal = abs(fft_shifted)
         # remove the low frequency gratings corresponding to the horizontal
         # and vertical limits of the image by replacing with the mean
-        midv, midh = np.round(np.array(self.__reciprocal.shape)/2).astype(int)
+        midv, midh = np.round(np.array(self.reciprocal.shape)/2).astype(int)
         pad = 2
-        newv = self.__reciprocal[[midv-pad, midv+pad]].mean(0)
-        newh = self.__reciprocal[:, [midh-pad, midh+pad]].mean(1)
-        self.__reciprocal[midv - (pad - 1): midv + pad] = newv[np.newaxis]
-        self.__reciprocal[:, midh - (pad - 1): midh +
-                   pad] = newh[:, np.newaxis]
+        newv = self.reciprocal[[midv-pad, midv+pad]].mean(0)
+        newh = self.reciprocal[:, [midh-pad, midh+pad]].mean(1)
+        self.reciprocal[midv - (pad - 1): midv + pad] = newv[np.newaxis]
+        self.reciprocal[:, midh - (pad - 1): midh + pad] = newh[:, np.newaxis]
+        height, width = self.reciprocal.shape
+        # instead of blurring, just use the autocorrelation
+        self.reciprocal = signal.correlate(
+            self.reciprocal, self.reciprocal, mode='same', method='fft')
         # apply a guassian blur to exclude the effect of noise
-        self.__reciprocal = ndimage.gaussian_filter(
-            self.__freqs * self.__reciprocal, sigma=fft_smoothing)
-        height, width = self.__reciprocal.shape
+        self.reciprocal = ndimage.gaussian_filter(
+            self.reciprocal, sigma=2)
         # find the peaks of the upper half of the reciprocal image
         peaks = peak_local_max(
-            self.__reciprocal[:round(height/2)], num_peaks=20)
+            self.reciprocal[:round(height/2)], num_peaks=3)
         ys, xs = peaks.T
+        peak_vals = self.reciprocal[ys, xs]
+        order = np.argsort(peak_vals)[::-1]
+        xs = xs[order]
+        ys = ys[order]
+        # TODO: fix this until it works
         # remove any key frequencies that are too low
         key_freqs = self.__freqs[:round(height/2)][ys, xs]
         key_freqs = key_freqs[key_freqs > .01]
@@ -1953,7 +2178,7 @@ class Stack():
             print_progress(num + 1, len(self.fns))
         print()
         
-    def load_masks(self, mask_fn=None, mask_arr=None):
+    def load_masks(self, mask_fn=None, arr=None):
         """Load the masks using either their mask file or array.
 
 
@@ -1961,12 +2186,12 @@ class Stack():
         ----------
         mask_fn : str, default=None
             Filename of the mask image.
-        mask_arr : np.ndarray, default=None
+        arr : np.ndarray, default=None
             2D boolean masking array. 
         """
         print("loading masks: ")
         for num, layer in enumerate(self.layers):
-            layer.load_mask(mask_fn=mask_fn, mask_arr=mask_arr)
+            layer.load_mask(mask_fn=mask_fn, arr=arr)
             print_progress(num + 1, len(self.fns))
         print()
 
@@ -2193,7 +2418,7 @@ class EyeStack(Stack):
         assert len(self.layers) > 0, (
             f"No layers loaded yet. Try running {self.load}.")
         # load the boolean masks
-        self.load_masks(mask_fn=self.eye_mask_fn, mask_arr=self.eye_mask)
+        self.load_masks(mask_fn=self.eye_mask_fn, arr=self.eye_mask)
         new_layers = []
         for layer in self.layers:
             new_layers += [layer.crop_eye()]
@@ -2201,8 +2426,7 @@ class EyeStack(Stack):
         self.layers = new_layers
         # crop the mask image to avoid shape issues
         self.mask = Eye(filename=self.eye_mask_fn, arr=self.eye_mask)
-        self.mask.load_mask(mask_fn=self.eye_mask_fn,
-                            mask_arr=self.eye_mask)
+        self.mask.load_mask(mask_fn=self.eye_mask_fn, arr=self.eye_mask)
         self.mask = self.mask.crop_eye()
         self.mask_arr = self.mask.image.astype('uint8')
         # mask the mask_fn None to avoid loading from file
@@ -2454,6 +2678,11 @@ class CTStack(Stack):
                 "points", data=np.zeros((0, 3)), dtype=float,
                 chunks=True, maxshape=(None, 3))
 
+    def save_database(self):
+        """Save the H5PY database."""
+        self.database.close()
+        self.load_database()
+
     def prefilter(self, low=0, high=None, folder="_prefiltered_stack"):
         """Filter the layers and then save in a new folder.
 
@@ -2535,13 +2764,11 @@ class CTStack(Stack):
         # store the new points to access the original coordinates
         # create the original points dataset
         # if an old version already exists, delete it
-        if "points_original" in self.database.keys():
+        if "points_original" in dir(self):
             del self.points_original
             del self.database["points_original"]
         self.points_original = self.database.create_dataset(
             "points_original", data=self.points)
-        self.database.close()
-        self.load_database()
 
     def get_cross_sections(self, thickness=1.0):
         """Approximate surface splitting the inner and outer sections.
@@ -2577,28 +2804,35 @@ class CTStack(Stack):
         subset = np.concatenate(subset)
         sphere = SphereFit(subset)
         center = sphere.center
-        self.center = center
-        center_dir = center / np.linalg.norm(center)
-        # center the points
-        self.points -= self.center[np.newaxis, :]
-        subset -= center[np.newaxis, :]
+        # # store the sphere's center
+        # self.center = center
+        # center_dir = center / np.linalg.norm(center)
+        # # center the points
+        # self.points -= self.center[np.newaxis, :]
+        # subset -= center[np.newaxis, :]
         # 2. Convert points to spherical coordinates
         # make a Points object of the subset
-        pts = Points(subset)    # performs spherical conversion on init
+        pts = Points(subset)    # performs spherical conversion 
         # 3. Spline interpolate radii as function of theta and phi
-        pts.fit_surface(image_size=1e4)
+        sphere.surface_predict(image_size=1e4)
         self.shell = pts
         # 4. find the spherical coordinates of all points
+        if "theta" in dir(self):
+            del self.theta, self.phi, self.radii, self.residual
+            del self.database['theta'], self.database['phi'], self.database['radii'], self.database['residual']
         self.theta = self.database.create_dataset(
             "theta", (len(self.points), ), dtype=float)
         self.phi = self.database.create_dataset(
             "phi", (len(self.points), ), dtype=float)
         self.radii = self.database.create_dataset(
             "radii", (len(self.points), ), dtype=float)
+        self.residual = self.database.create_dataset(
+            "residual", (len(self.points), ), dtype=float)
         # iterate through chunks to avoid loading too much into RAM
         chunksize = min(1e3, len(self.points))
         num_chunks = len(self.points)
-        for chunk_num in range(num_chunks):
+        chunks = range(num_chunks)
+        for chunk_num in chunks:
             start = round(chunk_num * chunksize)
             stop = round((chunk_num + 1) * chunksize)
             subset = self.points[start:stop]
@@ -2607,8 +2841,11 @@ class CTStack(Stack):
             self.theta[start:stop] = theta
             self.phi[start:stop] = phi
             self.radii[start:stop] = radii
-        self.database.close()
-        self.load_database()
+            # check predicted radius
+            print_progress(chunk_num, len(chunks))
+        predicted_radii = pts.surface_predict(
+            xvals=self.theta, yvals=self.phi)
+        self.residual[:] = self.radii - predicted_radii
 
     def find_ommatidial_clusters(self, polar_clustering=True,
                                  window_length=np.pi/4,
@@ -2643,21 +2880,30 @@ class CTStack(Stack):
         phi_min, phi_max = np.percentile(self.phi, [0, 100])
         # make 2D images and apply ODA to rotated sections
         self.sections = []
-        # figure out the number of windows vertically and horizontally
-        # inclination:
-        theta_num = round(abs(theta_max - theta_min) / window_length)
-        theta_vals = np.linspace(theta_min, theta_max, theta_num + 1)
-        theta_lows, theta_highs = theta_vals[:-1], theta_vals[1:]
-        # elevation:
-        phi_num = round(abs(phi_max - phi_min) / window_length)
-        phi_vals = np.linspace(phi_min, phi_max, phi_num + 1)
-        phi_lows, phi_highs = phi_vals[:-1], phi_vals[1:]
         # iterate through the windows +/- padding
+        # if it exists already but is the wrong length, delete and make new
+        if "include" in dir(self):
+            if len(self.points) != len(self.include):
+                del self.include
+                del self.database["include"]
         # store a binary filter array
-        self.include = self.database.create_dataset(
-            "include", (len(self.points),), dtype=bool)
-        for theta_low, theta_high in zip(theta_lows, theta_highs):
-            for phi_low, phi_high in zip(phi_lows, phi_highs):
+        if "include" not in dir(self):
+            self.include = self.database.create_dataset(
+                "include", (len(self.points),), dtype=bool)
+        # iterate through theta and phi ranges taking steps of window_length
+        theta_low = theta_min
+        phi_low = phi_min
+        while theta_low < theta_max:
+            theta_high = theta_low + window_length
+            # get relevant theta values
+            theta_center = np.mean([theta_low, theta_high])
+            theta_displacement = np.pi/2 - theta_center
+            while phi_low < phi_max:
+                # get important phi values
+                phi_high = phi_low + window_length
+                phi_center = np.mean([phi_low, phi_high])
+                phi_displacement = np.pi - phi_center
+                # store inclusion criteria in database
                 self.include[:] = True
                 # azimuth filter
                 self.include[:] *= (self.theta > theta_low - window_pad)
@@ -2667,12 +2913,24 @@ class CTStack(Stack):
                 self.include[:] *= (self.phi <= phi_high + window_pad)
                 # use the filter to get the points within the window
                 include = np.where(self.include)
+                # calculate angular displacements in order to rotate the center of mass
                 if len(include[0]) > 100:
-                    subset = self.points[include]
+                    # get included subset of points
+                    subset = np.array(self.points[include])
+                    subset = rotate(subset, phi_displacement, axis=2).T
+                    subset = rotate(subset, theta_displacement, axis=1).T
+                    polar = rectangular_to_spherical(subset)
                     # get the centered polar coordinates
-                    pts = Points(subset, sphere_fit=False)
+                    segment = Points(subset, sphere_fit=False, rotate_com=False,
+                                     spherical_conversion=False, polar=polar)
+                    # plt.scatter(segment.theta, segment.phi)
+                    # plt.plot(theta_center, phi_center, "ro")
+                    # plt.gca().set_aspect('equal')
+                    # # plt.xlim(theta_low - window_pad, theta_high + window_pad)
+                    # # plt.ylim(phi_low - window_pad, phi_high + window_pad)
+                    # plt.show()
                     # rasterize an image using the polar 2D histogram
-                    raster, (theta_vals, phi_vals) = pts.rasterize(
+                    raster, (theta_vals, phi_vals) = segment.rasterize(
                         image_size=image_size)
                     # make an Eye object of the raster image to get
                     # ommatidia centers
@@ -2686,7 +2944,7 @@ class CTStack(Stack):
                     # apply the ODA to the raster image
                     eye = Eye(arr=raster, pixel_size=pixel_size,
                               mask_arr=mask.astype(int), mask_fn=None)
-                    eye.oda(plot=True)
+                    eye.oda(plot=False)
                     # use the ommatidial centers to find the clusters 
                     centers = eye.ommatidia
                     # shift the coordinates using the min theta and phi
@@ -2695,9 +2953,16 @@ class CTStack(Stack):
                         # use polar angles for clustering
                         clusterer = cluster.KMeans(
                             n_clusters=len(centers), init=centers)
-                        lbls = clusterer.fit_predict(pts.polar[:, :2])
-                        breakpoint()
-                        plt.scatter(pts.theta, pts.phi, c=lbls)
+                        lbls = clusterer.fit_predict(segment.polar[:, :2])
+                        # randomize lbls and use 
+                        lbls_set = np.array(sorted(set(lbls)))
+                        scrambled_lbls = np.random.permutation(lbls_set)
+                        new_lbls = []
+                        for lbl in lbls:
+                            new_lbls += [scrambled_lbls[lbl]]
+                        plt.pcolormesh(theta_vals, phi_vals, raster.T)
+                        plt.scatter(segment.theta, segment.phi, c=new_lbls,
+                                    marker='.', cmap='tab20')
                         plt.scatter(centers[:, 0], centers[:, 1],
                                     marker='+', color='k')
                         plt.gca().set_aspect('equal')
@@ -2705,6 +2970,10 @@ class CTStack(Stack):
                     else:
                         # use the nearest points as seeds in the KMeans
                         breakpoint()
+                # update phi lower bound
+                phi_low += window_length
+            # update theta lower bound
+            theta_low += window_length
 
     def ommatidia_detecting_algorithm(self, polar_clustering=True):
         """Apply the 3D ommatidia detecting algorithm (ODA-3D).
@@ -2732,6 +3001,8 @@ class CTStack(Stack):
             self.gui = StackFilter(self.fns)
             low, high = self.gui.get_limits()
             self.import_stack(low, high)
+        self.save_database()
+        print("Stack imported.")
         # 2. once the points load, get cross sectional shell and 
         process_shell = True
         resp = ''
@@ -2744,5 +3015,8 @@ class CTStack(Stack):
             process_shell = resp == 1
         if process_shell:
             self.get_cross_sections()
+        self.save_database()
+        print("Cross-section loaded.")
         # 3. then find the ommatidia's centers
         self.find_ommatidial_clusters(polar_clustering=polar_clustering)
+        self.save_database()
