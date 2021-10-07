@@ -6,6 +6,67 @@ from matplotlib.backend_bases import NavigationToolbar2
 import PIL
 from tempfile import mkdtemp
 
+from PyQt5.QtWidgets import QWidget, QFileDialog, QApplication
+from pyqtgraph.Qt import QtCore, QtGui
+from PyQt5.QtWidgets import QFileDialog
+import pyqtgraph.opengl as gl
+import pyqtgraph as pg
+
+
+if 'app' not in globals():
+    app = QApplication([])
+
+
+class ScatterPlot3d():
+    """Plot 3d datapoints using pyqtgraph's GLScatterPlotItem."""
+
+    def __init__(self, arr, color=None, size=1, window=None,
+                 colorvals=None, cmap=plt.cm.viridis, title="3D Scatter Plot"):
+        self.title = title
+        self.arr = arr
+        self.app = app
+        self.color = color
+        self.cmap = cmap
+        self.size = size
+        self.window = window
+        self.n, self.dim = self.arr.shape
+        assert self.dim == 3, ("Input array should have shape "
+                               "N x 3. Instead it has "
+                               "shape {} x {}.".format(
+                                   self.n,
+                                   self.dim))
+        if colorvals is not None:
+            assert len(colorvals) == self.n, print("input colorvals should "
+                                                   "have the same lengths as "
+                                                   "input array")
+            if np.any(colorvals < 0) or np.any(colorvals > 1):
+                colorvals = (colorvals - colorvals.min()) / \
+                    (colorvals.max() - colorvals.min())
+            self.color = np.array([self.cmap(c) for c in colorvals])
+        elif color is not None:
+            assert len(color) == 4, print("color input should be a list or tuple "
+                                          "of RGBA values between 0 and 1")
+            if isinstance(self.color, (tuple, list)):
+                self.color = np.array(self.color)
+            if self.color.max() > 1:
+                self.color = self.color / self.color.max()
+            self.color = tuple(self.color)
+        else:
+            self.color = (1, 1, 1, 1)
+        self.plot()
+
+    def plot(self):
+        if self.window is None:
+            self.window = gl.GLViewWidget()
+            self.window.setWindowTitle(self.title)
+        self.scatter_GUI = gl.GLScatterPlotItem(
+            pos=self.arr, size=self.size, color=self.color)
+        self.window.addItem(self.scatter_GUI)
+
+    def show(self):
+        self.window.show()
+        self.app.exec_()
+
 
 class tracker_window():
 

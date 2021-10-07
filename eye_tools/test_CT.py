@@ -17,4 +17,5 @@ img_ext = ".tif"
 # make a ct stack object using the ct stack folder
 ct_stack = CTStack(dirname=ct_directory, img_extension=img_ext, bw=True,
                    pixel_size=PIXEL_SIZE, depth_size=DEPTH_SIZE)
-ct_stack.ommatidia_detecting_algorithm()
+ct_stack.ommatidia_detecting_algorithm(
+    polar_clustering=True, display=True, test=True)
