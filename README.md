@@ -1,5 +1,4 @@
 # Compound Eye Tools
-====================
 ## On Counting Ommatidia
 
 In grad school, my advisor challenged me to count the ommatidia of vinegar flies (_Drosophila melanogaster_). Fruit flies have two compound eyes, each composed of _hundreds_ of light collecting facets called ommatidia, which I quickly learned. Each facet collects an element of the picture (pixel) formed by the retina, so by studying the number and size of ommatidia, we can
