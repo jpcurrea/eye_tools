@@ -3,7 +3,7 @@
 
 When I started grad school, my advisor challenged me to count the ommatidia of the eyes of vinegar flies (_Drosophila melanogaster_). I quickly learned that vinegar flies have two compound eyes, each composed of _hundreds_ of light collecting facets called ommatidia. Each ommatidium collects an approximate pixel captured by the retina so that large ommatidia have greater sensitivity to low light levels. By knowing the number and size of ommatidia, we can figure out a good deal about their spatial resolution and light sensitivity. 
 
-![Resolution Comparison](https://github.com/jpcurrea/eye_tools/figs/resolution.png)
+![Image](https://github.com/jpcurrea/eye_tools/figs/resolution.png)
 
 And counting ommatidia is a worthwile endevour! Compound eyes are wielded by 
 
