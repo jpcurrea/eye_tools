@@ -2,11 +2,11 @@
 =======
 ## On Counting Ommatidia
 
-You can use the [editor on GitHub](https://github.com/jpcurrea/eye_tools/edit/main/README.md) to maintain and preview the content for your website in Markdown files.
+Upon starting grad school, my advisor challenged me to count the ommatidia of fruit flies. I quickly learned that fruit flies have a compound eye, composed of _hundreds_ of light collecting facets called ommatidia. Each facet collects an element of the picture (pixel) formed by the retina. So by studying the number and size of ommatidia, we can
 
-Whenever you commit to this repository, GitHub Pages will run [Jekyll](https://jekyllrb.com/) to rebuild the pages in your site, from the content in your Markdown files.
+Still, 
 
-### Markdown
+## Markdown
 
 Markdown is a lightweight and easy-to-use syntax for styling your writing. It includes conventions for
 
