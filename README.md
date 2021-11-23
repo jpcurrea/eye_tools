@@ -5,9 +5,14 @@ When I started grad school, my advisor challenged me to count the ommatidia of t
 
 ![Image](figs/resolution.png)
 
+
 And counting ommatidia is a worthwile endevour! Compound eyes are wielded by 
 
+![Image](figs/biodiversity.png)
+
 Still, it's a 
+
+
 
 ## Markdown
 
