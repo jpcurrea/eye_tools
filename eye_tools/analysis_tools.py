@@ -54,6 +54,7 @@ from skimage.draw import ellipse as Ellipse
 from skimage.feature import peak_local_max
 from sklearn import cluster, mixture
 
+import scipy
 from scipy import interpolate, optimize, ndimage, signal, spatial, stats
 from scipy.optimize import minimize
 from scipy.ndimage.filters import gaussian_filter
@@ -231,17 +232,51 @@ def angle_between(v1, v2):
     v2_u = v2 / np.linalg.norm(v2)
     return np.arccos(np.clip(np.dot(v1_u, v2_u), -1.0, 1.0))
 
+def positive_fit(predictor, outcome):
+    """Uses non-linear minimization to fit a polynomial to data
 
-def positive_fit(xs, ys):
-    # TODO: iterate through orders of polynomial degree and find best fit
-    def func(xs, pars):
-        return np.polyval(pars, xs)
+    
+    Parameters
+    ----------
+    predictor : np.ndarray
+        Array of values used to model the outcome.
+    outcome : np.ndarray
+        Array of values being predicted by the predictor.
+
+    Returns
+    -------
+    final_func : function
+        The final fitted function, producing estimate of outcome.
+    residuals_normalized : float
+        The squared residuals divided by the number of samples.
+    """
+    # if predictor and outcome have different shapes, make sure they
+    # have the same dimension
+    if predictor.shape != outcome.shape:
+        # check dimensions
+        if predictor.ndim != outcome.ndim:
+            max_dims = max(predictor.ndim, outcome.ndim)
+            if predictor.ndim < max_dims:
+                predictor = np.expand_dims(predictor, axis=-1)
+            if outcome.ndim < max_dims:
+                outcome = np.expand_dims(outcome, axis=-1)
+    # this only works if there are more predictors than outcome variables
+    assert outcome.shape[-1] == 1, ("There should only be one outcome variable.")
+    # iterates through orders of polynomial degree and find best fit
+    def func(predictor, pars):
+        return np.polyval(pars, predictor)
     def resid(pars):
-        return ((ys-func(xs, pars))**2).sum()
-    x_range = max(xs) - min(xs)
+        predicted_vals = func(predictor, pars)
+        # consider overdetermined case
+        if predictor.shape[-1] > outcome.shape[-1]:
+            predicted_vals = predicted_vals.sum(-1)
+        return ((outcome-predicted_vals)**2).sum()
+    predictor_range = predictor.ptp(0)
     def constr(pars):
-        new_xs = np.linspace(min(xs) - x_range/2, max(xs) + x_range/2, 1000)
-        pred_vals = func(new_xs, pars)
+        new_predictor = np.linspace(predictor.min(0) - predictor_range/2,
+                                    predictor.max(0) + predictor_range/2,
+                                    1000)
+        pred_vals = func(new_predictor, pars)
         deriv = np.diff(pred_vals)
         return min(deriv)
     con1 = {'type': 'ineq', 'fun': constr}
@@ -250,27 +285,33 @@ def positive_fit(xs, ys):
     for deg in np.arange(2, 5, 1):
         pars = np.zeros(deg)
         pars[0] = .1
-        res = minimize(resid, pars, method='cobyla',
-                       constraints=con1, options={'maxiter':50000})
+        # res = minimize(resid, pars, method='cobyla',
+        #                constraints=con1, options={'maxiter':50000})
+        res = minimize(resid, pars, method='cobyla', options={'maxiter':50000})
         # print(res)
-        new_xs = np.linspace(min(xs), max(xs))
-        pred_vals = func(new_xs, res.x)
+        new_predictor = np.linspace(min(predictor), max(predictor))
+        pred_vals = func(new_predictor, res.x)
         resids = resid(res.x)
         if resids < .95 * min_resids:
-            # plt.scatter(xs, ys)
-            # plt.plot(new_xs, pred_vals)
+            # plt.scatter(predictor, outcome)
+            # plt.plot(new_predictor, pred_vals)
             # plt.gca().set_aspect('equal')
             # plt.show()
             model = res
             min_resids = resids
-    pred_vals = func(new_xs, res.x)
+    pred_vals = func(new_predictor, res.x)
     def final_func(x):
         return np.polyval(model.x, x)
-    return final_func, resid(model.x)/len(xs)
+    # normalize the residuals by the the number of samples used
+    residuals_normalized = resid(model.x)/len(predictor)
+    return final_func, residuals_normalized
 
 
-def angle_fitter(pts, lbls, angle_deviation_limit=np.pi/3):
-    """(1) Import 3D coordinates and clusterd by lbls. (2) Using the cluster 
+def angle_fitter(pts, lbls, angle_deviation_limit=np.pi/3, display=False):
+    """
+
+
+    (1) Import 3D coordinates and clusterd by lbls. (2) Using the cluster 
     centers, fit a circle in order to do a polar transformation. (3) Use the 
     SVD of each cluster in 3D, projected onto the 2D plane, and then regress 
     the direction vectors on polar angle using robust linear modelling to account
@@ -278,9 +319,9 @@ def angle_fitter(pts, lbls, angle_deviation_limit=np.pi/3):
     # (1) import data
     lbls_set = sorted(set(lbls))
     # pts should have shape = N x (x, y, z) where z is the axis to be ignored
-    pts = np.array(pts)[np.argsort(lbls)]
+    pts = np.array(pts)#[np.argsort(lbls)]
     xs, ys, zs = pts.T
-    lbls.sort()
+    # lbls.sort()
     centers = np.zeros((len(lbls), 3))
     # find center per cluster
     group_centers = np.zeros((len(set(lbls)), 3))
@@ -320,13 +361,14 @@ def angle_fitter(pts, lbls, angle_deviation_limit=np.pi/3):
     neg_svds = svds[:, 1] > 0
     svds[neg_svds, :2] *= -1
     # replace any svds where angle difference > 60 degs with nan
-    ang_diffs = []
-    for svd, ray in zip(svds, rays):
-        dot = np.dot(svd[:2], ray)
-        ang_diff = np.arccos(dot)
-        ang_diffs += [ang_diff]
-    ang_diffs = np.array(ang_diffs)
-    include = ang_diffs <= angle_deviation_limit
+    # ang_diffs = []
+    # for svd, ray in zip(svds, rays):
+    #     dot = np.dot(svd[:2], ray)
+    #     ang_diff = np.arccos(dot)
+    #     ang_diffs += [ang_diff]
+    # ang_diffs = np.array(ang_diffs)
+    # include = ang_diffs <= angle_deviation_limit
+    include = np.ones(len(rays))
     # svds[include == False] = np.nan
     # rotate svds so they're centered at pi
     xmean, ymean = svds[:, :2].mean(0)
@@ -342,7 +384,8 @@ def angle_fitter(pts, lbls, angle_deviation_limit=np.pi/3):
     # use polyfit instead and iterate until there is a plateau in p values
     # or use curve_fit and set constraint on first derivative to be positive
     if include.sum() > 2:
-        mod, resids = positive_fit(group_polar_angles[include], angles[include])
+        # mod, resids = positive_fit(group_polar_angles[include], angles[include])
+        mod, resids = positive_fit(group_polar_angles, angles)
         wls_mod = mod
         new_xs = np.linspace(group_polar_angles.min(),
                              group_polar_angles.max(), 100) 
@@ -355,30 +398,38 @@ def angle_fitter(pts, lbls, angle_deviation_limit=np.pi/3):
         new_svds = rotate(new_svds_rotated, -rot_ang, axis=2).T
         norms = np.linalg.norm(new_svds[:, :2], axis=-1)
         new_svds /= norms[:, np.newaxis]
-        # TODO: check that the new_svds work as expected
-        # plot the clusters
-        fig = plt.figure()
-        plt.scatter(pts[:, 0], pts[:, 1], c=lbls, cmap='tab20')
-        # plot the centers
-        breakpoint()
-        for lbl, ray, svd, center in zip(lbls_set, rays, new_svds, group_centers[:, :2]):
-            ind = lbls == lbl
-            sub_pts = pts[ind]
-            # get angle difference using dot product
-            l = 5
-            # plot the vectors
-            p1, p2 = center - l * svd[-1][0][:2], center + l * svd[-1][0][:2]
-            plt.plot([p1[0], p2[0]], [p1[1], p2[1]], color=red)
-            p1, p2 = center - l * ray, center + l * ray
-            plt.plot([p1[0], p2[0]], [p1[1], p2[1]], color=green)
-            plt.scatter(sub_pts[:, 0], sub_pts[:, 1], marker='.', zorder=0)
-        plt.gca().set_aspect('equal')
-        plt.show()
+        if display:
+            # plot the clusters
+            fig = plt.figure()
+            # scramble lbls
+            new_lbls = dict()
+            new_vals = np.arange(len(set(lbls))) + 1
+            for lbl, new_val in zip(set(lbls), new_vals):
+                new_lbls[lbl] = new_val
+            clbls = []
+            for lbl in lbls:
+                clbls += [new_lbls[lbl]]
+            plt.scatter(pts[:, 0], pts[:, 1], c=clbls, cmap='tab20')
+            # plot the centers
+            for lbl, ray, svd, center in zip(lbls_set, rays, new_svds, group_centers[:, :2]):
+                ind = lbls == lbl
+                sub_pts = pts[ind]
+                # get angle difference using dot product
+                l = 30
+                # plot the vectors
+                p1, p2 = center - l * svd[:2], center + l * svd[:2]
+                plt.plot([p1[0], p2[0]], [p1[1], p2[1]], color=red)
+                p1, p2 = center - l * ray, center + l * ray
+                plt.plot([p1[0], p2[0]], [p1[1], p2[1]], color=green)
+                plt.scatter(sub_pts[:, 0], sub_pts[:, 1], marker='.', zorder=0)
+            plt.gca().set_aspect('equal')
+            plt.show()
     else:
         new_svds = np.zeros((len(lbls_set), 3))
         new_svds.fill(np.nan)
         resids = np.inf
     return lbls_set, new_svds[:, :2], resids
+    # return lbls_set, rays, resids
 
 
 def fit_circle(spX, spY):
@@ -669,6 +720,15 @@ class Points():
         if spherical_conversion:
             # optionally:
             if rotate_com:
+                # find svd of points 
+                # use a small sample of points
+                sample_inds = np.arange(len(self.pts))
+                num_points = 1000
+                sample_inds = np.random.choice(sample_inds, num_points)
+                # get svd solutions
+                # uu, dd, vv = np.linalg.svd(self.pts[sample_inds])
+                # new_pts = np.dot(self.pts, vv)[:, [1, 2, 0]]
+                # self.pts = new_pts
                 # rotate points using the center of mass:
                 # 1. find center of mass
                 com = self.pts.mean(0)
@@ -822,8 +882,9 @@ class Points():
         print()
         avg = np.array(avg)
         # filter outlier points by using bootstraped 95% confidence band (not of the mean)
-        low, high = np.percentile(avg[:, 2], [.5, 99.5])
-        self.avg = avg[np.logical_and(avg[:, 2] >= low, avg[:, 2] < high)]
+        # low, high = np.percentile(avg[:, 2], [.5, 99.5])
+        # self.avg = avg[np.logical_and(avg[:, 2] >= low, avg[:, 2] < high)]
+        self.avg = avg
         self.avg_x, self.avg_y, self.avg_z = self.avg.T
 
     def surface_predict(self, xvals=None, yvals=None, polar=True, image_size=1e4):
@@ -843,6 +904,14 @@ class Points():
         self.surface = np.zeros(len(points), dtype=float)
         self.surface[sort_inds] = interpolate.griddata(
             self.avg[:, :2], self.avg_z, points[sort_inds], method='nearest')
+        cubic_surface = interpolate.griddata(
+            self.avg[:, :2], self.avg_z, points[sort_inds], method='cubic')
+        # cubic interpolation can lead to NaNs
+        # replace these using the nearest method
+        no_nans = np.isnan(cubic_surface) == False
+        self.surface[sort_inds][no_nans] = cubic_surface[no_nans]
+        
+
 
     def get_polar_cross_section(self, thickness=.1, pixel_length=.01):
         """Find best fitting surface of radii using phis and thetas."""
@@ -2795,7 +2864,7 @@ class CTStack(Stack):
             "points_original", data=self.points)
 
 
-    def get_cross_sections(self, thickness=1.0, chunk_process=True):
+    def get_cross_sections(self, thickness=1.0, chunk_process=False):
         """Approximate surface splitting the inner and outer sections.
 
 
@@ -2807,7 +2876,7 @@ class CTStack(Stack):
         thickness : float, default=.3
             Proportion of the residuals to include in the cross section 
             used for the ODA.
-        chunk_process : bool, default=True
+        chunk_process : bool, default=False
             Whether to process  polar coordinates in chunks or all at 
             once, relying on RAM.
 
@@ -2848,7 +2917,7 @@ class CTStack(Stack):
         subset -= center[np.newaxis, :]
         # 2. Convert points to spherical coordinates
         # make a Points object of the subset
-        pts = Points(subset)    # performs spherical conversion 
+        pts = Points(subset, rotate_com=False)    # performs spherical conversion 
         # 3. Spline interpolate radii as function of theta and phi
         pts.surface_predict(image_size=1e4)
         self.shell = pts
@@ -2906,8 +2975,9 @@ class CTStack(Stack):
             self.residual = self.database.create_dataset(
                 "residual", data=residuals, dtype=float)
 
+
     def find_ommatidial_clusters(self, polar_clustering=True,
-                                 window_length=np.pi/4,
+                                 window_length=np.pi/8,
                                  window_pad=np.pi/20,
                                  image_size=1e5, mask_blur_std=2,
                                  square_lattice=False):
@@ -3029,7 +3099,8 @@ class CTStack(Stack):
                     # make a mask using the raster image
                     mask = raster > 0
                     mask = ndimage.gaussian_filter(mask.astype(float), 2)
-                    mask = mask > .1
+                    thresh = np.percentile(mask[mask > 0], 10)
+                    mask = mask > thresh
                     raster = 255 * (raster / raster.max())
                     raster = raster.astype('uint8')
                     # apply the ODA to the raster image
@@ -3038,85 +3109,102 @@ class CTStack(Stack):
                     eye.oda(plot=False, square_lattice=square_lattice)
                     # use the ommatidial centers to find the clusters 
                     centers = eye.ommatidia
-                    # shift the coordinates using the min theta and phi
-                    centers += [theta_vals.min(), phi_vals.min()]
-                    # use polar angles for clustering
-                    segment.surface_predict(
-                        xvals=centers[:, 0], yvals=centers[:, 1])
-                    model_radii = segment.surface
-                    centers = np.array([
-                        centers[:, 0], centers[:, 1], model_radii]).T
-                    if polar_clustering:
-                        # remove any centers with radii we couldn't model
-                        no_nans = np.any(np.isnan(centers), axis=1) == False
-                        centers = centers[no_nans]
-                        # KMeans to cluster points based on centers
-                        clusterer = cluster.KMeans(
-                            n_clusters=len(centers), init=centers[:, :2],
-                            n_init=1)
-                        polar = segment.polar
-                        lbls = clusterer.fit_predict(polar[:, :2])
-                    else:
-                        # use the nearest points as seeds in the KMeans in 3D
-                        # remove centers with unknown radii
-                        no_nans = np.isnan(centers[:, -1]) == False
-                        centers = centers[no_nans]
-                        # convert to rectangular coordinates
+                    # check that there are more points than centers, otherwise skip
+                    if len(centers) < len(subset):
+                        # shift the coordinates using the min theta and phi
+                        centers += [theta_vals.min(), phi_vals.min()]
+                        # use polar angles for clustering
+                        segment.surface_predict(
+                            xvals=centers[:, 0], yvals=centers[:, 1])
+                        model_radii = segment.surface
+                        centers = np.array([
+                            centers[:, 0], centers[:, 1], model_radii]).T
+                        if polar_clustering:
+                            # remove any centers with radii we couldn't model
+                            no_nans = np.any(np.isnan(centers), axis=1) == False
+                            centers = centers[no_nans]
+                            # KMeans to cluster points based on centers
+                            clusterer = cluster.KMeans(
+                                n_clusters=len(centers), init=centers[:, :2],
+                                n_init=1)
+                            polar = segment.polar
+                            lbls = clusterer.fit_predict(polar[:, :2])
+                            if test:
+                                lbls_set = np.arange(max(lbls) + 1)
+                                # randomize lbls and use 
+                                scrambled_lbls = np.random.permutation(lbls_set)
+                                new_lbls = scrambled_lbls[lbls]
+                                fig, ax = plt.subplots()
+                                ax.set_title("polar prediction")
+                                scatter = ax.scatter(polar[:, 0], polar[:, 1], c=new_lbls, cmap='tab20')
+                                plt.colorbar(scatter)
+                                ax.set_aspect('equal')
+                                plt.show()
+                        else:
+                            # use the nearest points as seeds in the KMeans in 3D
+                            # remove centers with unknown radii
+                            no_nans = np.isnan(centers[:, -1]) == False
+                            centers = centers[no_nans]
+                            # convert to rectangular coordinates
+                            centers_rect = spherical_to_rectangular(centers)
+                            # use KMeans with the 3D data
+                            clusterer = cluster.KMeans(
+                                n_clusters=len(centers), init=centers_rect,
+                                n_init=1)
+                            lbls = clusterer.fit_predict(subset)
+                        lbls_set = np.arange(max(lbls) + 1)
+                        # randomize lbls and use 
+                        scrambled_lbls = np.random.permutation(lbls_set)
+                        new_lbls = scrambled_lbls[lbls.astype(int)]
+                        # find centers within bounds
+                        # first, un-rotate the centers to the original reference frame
                         centers_rect = spherical_to_rectangular(centers)
-                        # use KMeans with the 3D data
-                        clusterer = cluster.KMeans(
-                            n_clusters=len(centers), init=centers_rect,
-                            n_init=1)
-                        lbls = clusterer.fit_predict(subset)
-                    lbls_set = np.arange(max(lbls) + 1)
-                    # randomize lbls and use 
-                    scrambled_lbls = np.random.permutation(lbls_set)
-                    new_lbls = scrambled_lbls[lbls]
-                    # find centers within bounds
-                    # first, un-rotate the centers to the original reference frame
-                    centers_rect = spherical_to_rectangular(centers)
-                    centers_original = rotate(
-                        centers_rect, -(theta_center - np.pi/2), axis=1).T
-                    centers_original = rotate(
-                        centers_original, -phi_center, axis=2).T
-                    centers_original_polar = rectangular_to_spherical(
-                        centers_original).T
-                    # use original bounds to get centers within window
-                    theta, phi, radii = centers_original_polar
-                    # azimuth filter
-                    in_window = (theta > theta_low - window_pad/2)
-                    in_window *= (theta <= theta_high + window_pad/2)
-                    # elevation filter
-                    in_window *= (phi > phi_low - window_pad/2)
-                    in_window *= (phi <= phi_high + window_pad/2)
-                    # store all clusters having centers within the window
-                    lbl_vals_set = lbls_set[in_window]
-                    lbls_in_window = np.in1d(lbls, lbl_vals_set)
-                    lbl_vals_in_window = lbls[lbls_in_window]
-                    # replace with sorted range of values
-                    new_lbl_vals_set = np.arange(len(lbl_vals_set))
-                    new_lbl_vals_set = new_lbl_vals_set + max_val + 1
-                    max_val += len(lbl_vals_set) + 1
-                    # make a lookup table to use original values as indices
-                    new_lbl_vals_lookup = np.empty(max(lbls_set)+1)
-                    new_lbl_vals_lookup.fill(np.nan)
-                    new_lbl_vals_lookup[in_window] = new_lbl_vals_set
-                    # convert using the new lookup table
-                    new_lbls = new_lbl_vals_lookup[lbls]
-                    no_nans = np.isnan(new_lbls) == False
-                    new_lbls_in_window = (new_lbls[no_nans]).astype(int)
-                    inds = include[0][lbls_in_window * no_nans]
-                    # store
-                    self.labels[inds] = new_lbls_in_window
-                    segment_number += 1
-                    print()
+                        centers_original = rotate(
+                            centers_rect, -(theta_center - np.pi/2), axis=1).T
+                        centers_original = rotate(
+                            centers_original, -phi_center, axis=2).T
+                        centers_original_polar = rectangular_to_spherical(
+                            centers_original).T
+                        # use original bounds to get centers within window
+                        theta, phi, radii = centers_original_polar
+                        # azimuth filter
+                        in_window = (theta > theta_low - window_pad/2)
+                        in_window *= (theta <= theta_high + window_pad/2)
+                        # elevation filter
+                        in_window *= (phi > phi_low - window_pad/2)
+                        in_window *= (phi <= phi_high + window_pad/2)
+                        # remove non-positive lbls
+                        positive = lbls_set > 0
+                        in_window *= positive
+                        # store all clusters having centers within the window
+                        lbl_vals_set = lbls_set[in_window]
+                        # get lbl vals in window
+                        lbls_in_window = np.in1d(lbls, lbl_vals_set)
+                        lbl_vals_in_window = lbls[lbls_in_window]
+                        # replace with sorted range of values
+                        new_lbl_vals_set = np.arange(len(lbl_vals_set))
+                        new_lbl_vals_set = new_lbl_vals_set + max_val + 1
+                        max_val += len(lbl_vals_set) + 1
+                        # make a lookup table to use original values as indices
+                        new_lbl_vals_lookup = np.empty(max(lbls_set)+1)
+                        new_lbl_vals_lookup.fill(np.nan)
+                        new_lbl_vals_lookup[in_window] = new_lbl_vals_set
+                        # convert using the new lookup table
+                        new_lbls = new_lbl_vals_lookup[lbls]
+                        no_nans = np.isnan(new_lbls) == False
+                        new_lbls_in_window = (new_lbls[no_nans]).astype(int)
+                        inds = include[0][lbls_in_window * no_nans]
+                        # store, ignoring lbls originally set to 0
+                        self.labels[inds] = new_lbls_in_window
+                        segment_number += 1
+                        print()
                 # update phi lower bound
                 phi_low += window_length
             # update theta lower bound
             theta_low += window_length
             phi_low = phi_min
 
-    def measure_ommatidia(self, square_lattice=False):
+    def measure_ommatidia(self, square_lattice=False, test=False):
         """Take measurements of ommatidia using the ommatidial clusters.
 
         
@@ -3136,7 +3224,7 @@ class CTStack(Stack):
         centers = []
         xs, ys, zs, thetas, phis, radii = [], [], [], [], [], []
         size = []
-        label_set = sorted(set(self.labels[:]))
+        label_set = np.array(sorted(set(self.labels[:])))
         # iterate through the set of labels
         for num, lbl in enumerate(label_set):
             inds = np.where(self.labels[:] == lbl)[0]
@@ -3193,10 +3281,10 @@ class CTStack(Stack):
         neighbor_dists, neighbor_lbls = centers_tree.query(
             centers, k=num_neighbors + 1, distance_upper_bound=upper_limit)
         neighbor_dists = neighbor_dists[:, 1:]
+        neighbor_lbls = neighbor_lbls[:, 1:]
         # replace infs with nans
         to_replace = neighbor_dists == np.inf
         neighbor_dists[to_replace] = np.nan
-        neighbor_lbls = neighbor_lbls[:, 1:]
         # get a larger neighborhood of points for calculating normal vectors
         big_neighborhood_dists, big_neighborhood_lbls = centers_tree.query(
             centers, k=51)
@@ -3206,7 +3294,8 @@ class CTStack(Stack):
         approx_vectors = []
         skewness = []
         neighborhood = []
-        # iterature through the clusters and take measurements
+        # iterate through the clusters and take measurements
+        print("\nProcessing ommatidial data:")
         for num, (center, lbl, neighbor_group,
                   neighbor_dist, big_group, big_dist) in enumerate(zip(
                       centers, label_set,
@@ -3224,7 +3313,10 @@ class CTStack(Stack):
             small_neighborhood = centers[neighbor_group]
             big_neighborhood = centers[big_group]
             # 1. lens area using mean distance to nearest neighbors
-            diam = np.nanmean(neighbor_dist)
+            if np.all(np.isnan(neighbor_dist)):
+                diam = np.nan
+            else:
+                diam = np.nanmean(neighbor_dist)
             area = np.pi * (.5 * diam) ** 2
             lens_area += [area]
             # 2. approximate ommatidial axis using average normal
@@ -3264,7 +3356,7 @@ class CTStack(Stack):
             inside_ang = angle_between(approx_vector, anatomical_vector)
             skewness += [inside_ang]
             # 5. store neighbor groups
-            neighborhood += [neighbor_group]
+            neighborhood += [label_set[neighbor_group]]
             print_progress(num + 1, len(centers))
         # convert to numpy arrays
         lens_area = np.array(lens_area)
@@ -3285,6 +3377,7 @@ class CTStack(Stack):
         # save the spreadsheet as a csv and pickle file
         ommatidial_data.to_csv(csv_filename, index=False)
         ommatidial_data.to_pickle(csv_filename.replace(".csv", ".pkl"))
+        self.ommatidial_data = ommatidial_data
         labels = self.ommatidial_data.neighbors.values
         cluster_lbls = self.labels[:]
         # process ommatidial pair information based on neighborhood estimates
@@ -3335,16 +3428,13 @@ class CTStack(Stack):
         pairs_tested = np.array(list(pairs))
         orientations = np.array(list(orientations))
         # store as datasets
-        for var, arr, width in zip(
-                ['pair_centers', 'pairs_tested', 'orientations'],
-                [pair_centers, pairs_tested, orientations],
-                [3, 2, 1]):
-            if var in dir(self):
-                delattr(self, var)
-                del self.database[var]
-            dataset = self.database.create_dataset(
-                var, data=arr)
-            setattr(self, var, dataset)
+        var = 'pairs_tested'
+        if var in dir(self):
+            delattr(self, var)
+        if var in self.database.keys():
+            del self.database[var]
+        dataset = self.database.create_dataset(
+            var, data=pairs_tested)
         
 
     def measure_interommatidia(self, square_lattice=False, test=False):
@@ -3355,14 +3445,15 @@ class CTStack(Stack):
         ----------
         square_lattice : bool, default=False
             Whether the ommatidial lattice is square vs. hexagonal.
+        test : bool, default=False
+            Whether to perform code blocks related to troubleshooting.
         """
         labels = self.ommatidial_data.neighbors.values
         cluster_lbls = self.labels[:]
-        # store the tested pairs as an array
+        # load the tested pairs data
         pair_centers = self.pair_centers[:]
         pairs_tested = self.pairs_tested[:]
         orientations = self.orientations[:]
-        # store as datbases
         # rotate centers to minimize variance along one dimension
         centers_components = np.linalg.svd(pair_centers[::100] - pair_centers.mean(0))[2]
         centers_rotated = np.dot(pair_centers - pair_centers.mean(0), centers_components)
@@ -3433,15 +3524,18 @@ class CTStack(Stack):
                 # use angle_fitter to find ommatidial rays
                 lbls_set, rays, residuals = angle_fitter(
                     pts=pts_in_slice[:, [other_ind, zind, var_ind]],
-                    lbls=lbls_in_slice)
+                    lbls=lbls_in_slice, display=test)
                 zvals = rays[:, 1]
                 # store projected coordinates 
                 for lbl, ray, zval in zip(
                         np.unique(lbls_in_slice),
                         rays, zvals):
-                    projected_coords[lbl][other_ind] = ray[0]/zval
-                    projected_coords[lbl][zind] = 1
-                    projected_coords[lbl][var_ind] = 0
+                    try:
+                        projected_coords[lbl][other_ind] = ray[0]/zval
+                        projected_coords[lbl][zind] = 1
+                        projected_coords[lbl][var_ind] = 0
+                    except:
+                        breakpoint()
                 # store pair centers 
                 pair_centers_in_slice = []
                 for pair in pairs_tested:
@@ -3450,14 +3544,16 @@ class CTStack(Stack):
                         if val in cluster_centers.keys():
                             center = cluster_centers[val][[other_ind, zind]]
                         else:
-                            center = pts_in_slice[lbls_in_slice[ind] == val, [other_ind, zind]].mean(0)
+                            center = np.repeat(np.nan, 2)
+                            # breakpoint()
+                            # center = pts_in_slice[lbls_in_slice[ind] == val, [other_ind, zind]].mean(0)
                         centers_per_pair += [center]
                     pair_centers_in_slice += [np.array(centers_per_pair)]
                 if test:
                     # plot the cross section with their smoothed ommatidial axes
                     fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(10, 10))
                     ax.scatter(pts_in_slice[:, other_ind], pts_in_slice[:, zind], c=clbls,
-                               alpha=.5, edgecolors='none', marker='.', cmap='tab20')
+                               alpha=.5, edgecolors='none', marker='o', cmap='tab20')
                     ax.set_aspect('equal')
                     xmin, xmax = np.percentile(self.points[:, other_ind], [0, 100])
                     ymin, ymax = np.percentile(self.points[:, zind], [0, 100])
@@ -3474,7 +3570,7 @@ class CTStack(Stack):
                     key_pts = np.array(key_pts)
                     xvals, yvals = key_pts.T
                     inset_axes = []
-                    inset_box_width = y_range / 12
+                    inset_box_width = y_range / 6
                     inset_width = inset_box_width / 2
                     inset_ys = np.repeat(ymax, 3)
                     inset_ys -= inset_box_width * np.arange(1, 4)
@@ -3522,55 +3618,28 @@ class CTStack(Stack):
                         [line.set_visible(False) for line in lines]
                         inset_axes += [axins]
                 # calculate interommatidial angles
-                breakpoint()
+                included_pair = []
+                for pair in pairs_in_slice:
+                    included_pair += [pair[0] in lbls_set and pair[1] in lbls_set]
                 ioas = []
                 for pair in pairs_in_slice:
-                    # get ommatidial axes and centers to calculate the IOA
-                    ray1 = rays[lbls_set == pair[0]][0]
-                    ray2 = rays[lbls_set == pair[1]][0]
-                    center1 = pts_in_slice[lbls_in_slice == pair[0]].mean(0)[[other_ind, zind]]
-                    center2 = pts_in_slice[lbls_in_slice == pair[1]].mean(0)[[other_ind, zind]]
-                    ioa = np.arccos(np.dot(ray1, ray2.T))
-                    # testing:
-                    # plot all points from the two clusters
-                    # fig = plt.figure()
-                    # for lbl, color in zip(pair, [blue, red]):
-                    #     ind = lbls_in_slice == lbl
-                    #     sub_pts = pts_in_slice[ind][:, [other_ind, zind]]
-                    #     plt.scatter(sub_pts[:, 0], sub_pts[:, 1], color=color)
-                    # plt.scatter(center1[0], center1[1], color='k', marker='o')
-                    # plt.scatter(center2[0], center2[1], color='k', marker='o')
-                    # plot intersection
-                    dx1, dy1 = np.squeeze(ray1)
-                    m1 = dy1/dx1
-                    dx2, dy2 = np.squeeze(ray2)
-                    m2 = dy2/dx2
-                    x1, y1 = center1
-                    x2, y2 = center2
-                    yint1 = y1 - m1*x1
-                    yint2 = y2 - m2*x2
-                    intersectx = (yint1 - yint2) / (m2 - m1)
-                    intersecty = m1 * intersectx + yint1
-                    plt.plot([x1, intersectx, x2], [y1, intersecty, y2],
-                             color='k', alpha=.15)
-
-                    plt.gca().set_aspect('equal')
-                    plt.show()
-                    length = 10
-                    # end testing.
-                    # store IOA data
-                    ioas += [ioa]
-                    pair_ind = np.where(np.all((pairs_tested - pair[np.newaxis]) == 0, axis=1))
-                    var_IOAs[pair_ind] = ioa
-                    var_IOA_resids[pair_ind] = residuals
-                    if test:
-                        for center in [center1, center2]:
-                            ax.scatter(center[0], center[1], edgecolors='none',
-                                        marker='.', color='k')
-                            for axins in inset_axes:
-                                axins.scatter(center[0], center[1], edgecolors='none',
-                                              marker='.', color='k')
-                        # find intersection given the two centers and their direction vectors
+                    if pair[0] in lbls_set and pair[1] in lbls_set:
+                        # get ommatidial axes and centers to calculate the IOA
+                        ray1 = rays[lbls_set == pair[0]][0]
+                        ray2 = rays[lbls_set == pair[1]][0]
+                        center1 = pts_in_slice[lbls_in_slice == pair[0]].mean(0)[[other_ind, zind]]
+                        center2 = pts_in_slice[lbls_in_slice == pair[1]].mean(0)[[other_ind, zind]]
+                        ioa = np.arccos(np.dot(ray1, ray2.T))
+                        # testing:
+                        # plot all points from the two clusters
+                        # fig = plt.figure()
+                        # for lbl, color in zip(pair, [blue, red]):
+                        #     ind = lbls_in_slice == lbl
+                        #     sub_pts = pts_in_slice[ind][:, [other_ind, zind]]
+                        #     plt.scatter(sub_pts[:, 0], sub_pts[:, 1], color=color)
+                        # plt.scatter(center1[0], center1[1], color='k', marker='o')
+                        # plt.scatter(center2[0], center2[1], color='k', marker='o')
+                        # plot intersection
                         dx1, dy1 = np.squeeze(ray1)
                         m1 = dy1/dx1
                         dx2, dy2 = np.squeeze(ray2)
@@ -3581,18 +3650,51 @@ class CTStack(Stack):
                         yint2 = y2 - m2*x2
                         intersectx = (yint1 - yint2) / (m2 - m1)
                         intersecty = m1 * intersectx + yint1
-                        ax.plot([x1, intersectx, x2], [y1, intersecty, y2],
+                        plt.plot([x1, intersectx, x2], [y1, intersecty, y2],
                                  color='k', alpha=.15)
-                        for axins in inset_axes:
-                            axins.plot([x1, intersectx, x2], [y1, intersecty, y2],
-                                       color='k', alpha=.15)
-                        ioa = np.arccos(np.dot(ray1, ray2.T))
+
+                        # plt.gca().set_aspect('equal')
+                        # plt.show()
+                        # if not np.isnan(ray1[0]) and not np.isnan(ray2[0]):
+                        #     breakpoint()
+                        #     plt.show()
+                        length = 10
+                        # end testing.
+                        # store IOA data
                         ioas += [ioa]
                         pair_ind = np.where(np.all((pairs_tested - pair[np.newaxis]) == 0, axis=1))
                         var_IOAs[pair_ind] = ioa
                         var_IOA_resids[pair_ind] = residuals
-                        print_progress(num, len(pairs_tested))
-                        num += 1
+                        if test:
+                            for center in [center1, center2]:
+                                ax.scatter(center[0], center[1], edgecolors='none',
+                                            marker='.', color='k')
+                                for axins in inset_axes:
+                                    axins.scatter(center[0], center[1], edgecolors='none',
+                                                  marker='.', color='k')
+                            # find intersection given the two centers and their direction vectors
+                            dx1, dy1 = np.squeeze(ray1)
+                            m1 = dy1/dx1
+                            dx2, dy2 = np.squeeze(ray2)
+                            m2 = dy2/dx2
+                            x1, y1 = center1
+                            x2, y2 = center2
+                            yint1 = y1 - m1*x1
+                            yint2 = y2 - m2*x2
+                            intersectx = (yint1 - yint2) / (m2 - m1)
+                            intersecty = m1 * intersectx + yint1
+                            ax.plot([x1, intersectx, x2], [y1, intersecty, y2],
+                                     color='k', alpha=.15)
+                            for axins in inset_axes:
+                                axins.plot([x1, intersectx, x2], [y1, intersecty, y2],
+                                           color='k', alpha=.15)
+                            ioa = np.arccos(np.dot(ray1, ray2.T))
+                            ioas += [ioa]
+                            pair_ind = np.where(np.all((pairs_tested - pair[np.newaxis]) == 0, axis=1))
+                            var_IOAs[pair_ind] = ioa
+                            var_IOA_resids[pair_ind] = residuals
+                            print_progress(num, len(pairs_tested))
+                            num += 1
                 plt.sca(ax)
                 title = f"{var_lbl}=[{np.round(var_start, 2)}, {np.round(var_stop, 2)}]"
                 plt.title(title)
@@ -3656,10 +3758,531 @@ class CTStack(Stack):
         interommatidial_data.to_csv(os.path.join(project_folder, "interommatidial_data.pkl"),
                                     index=False)
                     
+    def measure_interommatidia_fast(self, test=False, display=False):
+        """Use the anatomical axes to quickly measure interommatidial angles.
+
+        
+        Parameters
+        ----------
+        test : bool, default=False
+            Whether to run troublshooting options.
+        display : bool, default=False
+            Whether to display the processed information.
+        
+        Attributes
+        ----------
+        
+        """
+        # model the 3D direction vectors as a function of
+        # azimuth and elevation
+        # testing: first, plot the horizontal and vertical direction components
+        # of each anatomical vector
+        # horizontal component
+        thetas, phis = self.ommatidial_data[['theta', 'phi']].values.T
+        pts = self.ommatidial_data[['x', 'y', 'z']].values
+        axes = self.ommatidial_data.anatomical_axis.values
+        axes = np.array([ax for ax in axes])
+        # get angles
+        h_angs = np.arctan2(axes[:, 1], axes[:, 0])
+        v_angs = np.arctan2(axes[:, 2], axes[:, 0])
+        # center points using sphere center
+        pt_model = SphereFit(np.copy(pts))
+        center = pt_model.center
+        pts -= center
+        if test:
+            scatter = ScatterPlot3d(pts, size=5)
+            scatter.show()
+            # plot polar coordinates 
+            dth, dph, dr = rectangular_to_spherical(axes).T
+            th, ph, r = rectangular_to_spherical(pts).T
+            # plot centers
+            fig = plt.figure()
+            plt.scatter(th, ph, c=r)
+            # plot vectors
+            l = .005
+            lows = [th - l*dth, ph - l*dph]
+            highs = [th + l*dth, ph + l*dph]
+            plt.plot([lows[0], highs[0]], [lows[1], highs[1]], color='k', alpha=.1)
+            plt.gca().set_aspect('equal')
+            plt.show()
+        # get the svd
+        # use the Points class to properly rotate the COM
+        # uu, dd, vv = np.linalg.svd(pts)
+        # # use vv to rotate pts and axes
+        # pts = np.dot(pts, vv)[:, [1, 2, 0]]
+        # axes = np.dot(axes, vv)[:, [1, 2, 0]]
+
+        # rotate points using the center of mass:
+        # 1. find center of mass
+        com = pts.mean(0)
+        # 2. rotate along x axis (com[0]) until z (com[2]) = 0
+        ang1 = np.arctan2(com[2], com[1])
+        com1 = rotate(com, ang1, axis=0)
+        rot1 = rotate(pts, ang1, axis=0).T
+        axes_rot1 = rotate(axes, ang1, axis=0).T
+        # 3. rotate along z axis (com[2]) until y (com[1]) = 0
+        ang2 = np.arctan2(com1[1], com1[0])
+        pts = rotate(rot1, ang2, axis=2).T
+        axes = rotate(rot1, ang2, axis=2).T
+        if test:
+            # plot scatter plot of all the vectors
+            fig, axs = plt.subplots(ncols=2)
+            h_ax, v_ax = axs
+            random_order = np.random.permutation(np.arange(len(thetas)))
+            for ax, vals, title in zip(
+                    [h_ax, v_ax],
+                    [h_angs, v_angs],
+                    ['Horizontal', 'Vertical']):
+                ax.scatter(thetas[random_order], phis[random_order],
+                           c=vals[random_order], alpha=.1)
+                ax.set_aspect('equal')
+                ax.set_title(title)
+            # plot scatter plots for each component of the vectors
+            fig, axs = plt.subplots(ncols=3)
+            for ax, vals, title in zip(
+                    axs,
+                    axes.T,
+                    ['x', 'y', 'z']):
+                scatter = ax.scatter(thetas[random_order], phis[random_order],
+                                     c=vals[random_order], alpha=.1)
+                ax.set_aspect('equal')
+                ax.set_title(title + ' component')
+                plt.colorbar(scatter, ax=ax)
+            # plot each component in a narrow band of elevations
+            included = np.abs(phis-phis.mean()) < np.pi/128
+            fig, axs = plt.subplots(ncols=3)
+            for ax, vals, title in zip(
+                    axs,
+                    axes.T,
+                    ['x', 'y', 'z']):
+                ax.scatter(thetas[included], vals[included], color='k')
+                ax.set_aspect('equal')
+                ax.set_title(title + ' component')
+            plt.show()
+        # give vertical and horizontal slice numbers to each interommatidial pair
+        labels = np.copy(self.ommatidial_data.label.values)
+        # get interommatidial pairs 
+        pair_labels = self.pairs_tested[:]
+        # remove any labels that are not in the ommatidial_data dataset
+        in_dataset = np.all(np.isin(pair_labels, labels), axis=1)
+        pair_labels = pair_labels[in_dataset]
+        # grab the relevant cluster centers and ommatidial axes
+        pair_inds = np.searchsorted(labels, pair_labels)
+        pair_pts = pts[pair_inds]
+        pair_axes = axes[pair_inds]
+        # calculate centers as mean and orientations as normalized difference
+        pair_centers = pair_pts.mean(1)
+        # get pair orientation in polar coordinates
+        pair_polar = rectangular_to_spherical(np.vstack(pair_pts)).reshape(pair_pts.shape)
+        pair_orientations = pair_polar[:, 0, :2] - pair_polar[:, 1, :2]
+        pair_diams = np.linalg.norm(pair_pts[:, 0] - pair_pts[:, 1], axis=-1)
+        pair_orientations /= np.linalg.norm(pair_orientations, axis=1)[:, np.newaxis]
+        pair_orientations = np.arctan2(
+            pair_orientations[:, 1], pair_orientations[:, 0])
+        # for each section, project anatomical vectors onto the parallel plane
+        # and ignore the flattened dimension. For instance, for a vertical
+        # section, we flatten the dimension of width, ignoring x values and
+        # then find the polar angle of all the flattened points (y, z), rotating
+        # to avoid the polar boundary problems. Store the resulting angle
+        # between projected axis vectors as a measure of one component of the
+        # io angle
+        horizontal_angles = {}          # make a dictionary of horizontal angles
+        vertical_angles = {}          # make a dictionary of vertical angles
+        # make an empy dataset with a row for each interommatidial pair
+        cols = ["lbl1", "lbl2",
+                "pt1_x", "pt1_y", "pt1_z", "pt1_th", "pt1_ph", "pt1_r",
+                "pt1_dx", "pt1_dy", "pt1_dz",
+                "pt2_x", "pt2_y", "pt2_z", "pt2_th", "pt2_ph", "pt2_r",
+                "pt2_dx", "pt2_dy", "pt2_dz",
+                "orientation", "diameter",
+                "angle_h", "angle_v", "angle_total"]
+        interommatidial_data = pd.DataFrame(
+            np.zeros((len(pair_labels), len(cols))), columns=cols)
+        # store the pair data
+        for col, val in zip(
+                cols[:2], [pair_labels[:, 0], pair_labels[:, 1]]):
+            interommatidial_data[col] = val
+        # store data to identify and locate each interommatidial pair
+        for pt, arr, polar, axes in zip(
+                ['1', '2'], [pair_pts[:, 0], pair_pts[:, 1]],
+                [pair_polar[:, 0], pair_polar[:, 1]],
+                [axes[:, 0], axes[:, 1]]):
+            for col, vals in zip(
+                    [f'pt{pt}_x', f'pt{pt}_y', f'pt{pt}_z'],
+                    arr.T):
+                interommatidial_data[col] = vals
+            for col, vals in zip(
+                    [f'pt{pt}_th', f'pt{pt}_ph', f'pt{pt}_r'],
+                    polar.T):
+                interommatidial_data[col] = vals
+            for col, vals in zip(
+                    [f'pt{pt}_dx', f'pt{pt}_dy', f'pt{pt}_dz'],
+                    axes.T):
+                interommatidial_data[col] = vals
+            # store ommatidial axis data for each interommatidial pair
+        interommatidial_data.orientation = pair_orientations
+        num = 0
+        # process interommatidial pairs in sections
+        print("\nProcessing interommatidial data:")
+        for flat_dim, angle_col in zip(
+                [1, 2], ['angle_h', 'angle_v']):
+            # find limits of the flattened dimension
+            flat_vals = pair_centers[..., flat_dim]
+            limits = np.linspace(flat_vals.min(), flat_vals.max(), 21)
+            # find pair centers within the limits of non-flat dimensions
+            for lim_low, lim_high in zip(
+                    limits[:-1], limits[1:]):
+                include = pair_centers[:, flat_dim] >= lim_low
+                include *= pair_centers[:, flat_dim] <= lim_high
+                labels_in_slice = pair_labels[include]
+                centers_in_slice = pair_centers[include]
+                pairs_in_slice = pair_inds[include]
+                polar_in_slice = pair_polar[include]
+                pts_in_slice = pair_pts[include]
+                axes_in_slice = pair_axes[include]
+                # get dimensions other than the flat dimension
+                other_dims = np.arange(pts.shape[-1])
+                other_dims = other_dims[other_dims != flat_dim]
+                other_dim, depth = pts_in_slice[..., other_dims].T
+                # plot the axes
+                x, y = pts_in_slice[..., other_dims].transpose(2, 0, 1)
+                dx, dy = axes_in_slice[..., other_dims].transpose(2, 0, 1)
+                # convert x and y to polar angle
+                theta = np.arctan2(x, y)
+                # convert dx and dy to get ommatidial angle
+                phi = np.arctan2(dx, dy)
+                # check that all theta are above 0, if not wrap around
+                theta_neg = theta < 0
+                theta[theta_neg] = theta[theta_neg] + 2*np.pi
+                # fit a positive polynomial to the axis orientations
+                model, resids = positive_fit(
+                    theta.flatten(), phi.flatten()[:, np.newaxis])
+                new_phi = model(theta)
+                # get dy and dx based on new phi
+                norm = np.sqrt(dx**2 + dy**2)
+                new_dy = norm * np.cos(new_phi)
+                new_dx = norm * np.sin(new_phi)
+                # new_axes has shape = (num samples, 2 cones, 2 dimensions)
+                axes_new = np.array([new_dx, new_dy]).transpose(1, 2, 0) 
+                # measure goodness of fit using r squared
+                corr_r, corr_p = stats.pearsonr(
+                    phi.flatten(), new_phi.flatten())
+                if test:
+                    l = .05
+                    fig, axs = plt.subplots(ncols=2)
+                    cart_ax, polar_ax = axs
+                    data_line = cart_ax.plot(
+                        [x.flatten()-l*dx.flatten(),
+                         x.flatten()+l*dx.flatten()],
+                        [y.flatten()-l*dy.flatten(),
+                         y.flatten()+l*dy.flatten()],
+                        color=green, alpha=.5)
+                    cart_ax.scatter(x, y)
+                    cart_ax.set_aspect('equal')
+                    # plot polar coords and projected ommatidial axes
+                    polar_ax.scatter(theta, phi)
+                    inds = np.argsort(theta.flatten())
+                    polar_ax.plot(
+                        theta.flatten()[inds],
+                        new_phi.flatten()[inds], color='k')
+                    polar_ax.set_aspect('equal')
+                    polar_ax.set_title(f"r={corr_r}, p={corr_p}")
+                    # plot the coords and new phi
+                    model_line = cart_ax.plot(
+                        [x.flatten()-l*new_dx.flatten(),
+                         x.flatten()+l*new_dx.flatten()],
+                        [y.flatten()-l*new_dy.flatten(),
+                         y.flatten()+l*new_dy.flatten()],
+                        color=red, alpha=.5)
+                    # cart_ax.scatter(x, y)
+                    cart_ax.set_aspect('equal')
+                    # cart_ax.legend()
+                    plt.show()
+                    scatter = ScatterPlot3d(pts, size=1)
+                    scatter2 = ScatterPlot3d(pts_in_slice[:, 0],
+                                             color=(1, 0, 0, 1),
+                                             size=10, window=scatter.window)
+                    scatter3 = ScatterPlot3d(pts_in_slice[:, 1],
+                                             color=(0, 0, 1, 1),
+                                             size=10, window=scatter.window)
+                # measure IO angles per pair
+                # measure angle between new_axes[:, 0] and new_axes[:, 1]
+                angles = []
+                inds = []
+                for pair, lbls in zip(axes_new, labels_in_slice):
+                    angle = angle_between(pair[0], pair[1])
+                    # if angle > np.pi/2:
+                    #     breakpoint()
+                    # find the row in dataset corresponding to this pair
+                    lbl1, lbl2 = lbls
+                    i = interommatidial_data.lbl1.values == lbl1
+                    i *= interommatidial_data.lbl2.values == lbl2
+                    if sum(i) > 0:
+                        inds += [np.where(i)[0][0]]
+                        angles += [angle]
+                interommatidial_data.loc[inds, angle_col] = angles
+                num += 1
+                print_progress(num, 40)
+        # calculate the total io angle
+        dx, dy = interommatidial_data.angle_h, interommatidial_data.angle_v
+        interommatidial_data.angle_total = np.sqrt(dx**2 + dy**2)
+        # 
+        if test:
+            # rotate all negative orientations
+            interommatidial_data.orientation = abs(interommatidial_data.orientation)
+            # plot the horizontal and vertical IO angle components
+            fig, axes = plt.subplots(ncols=2)
+            axes[0].hist2d(interommatidial_data.orientation * 180 / np.pi,
+                            interommatidial_data.angle_h * 180 / np.pi,
+                            color='k', bins=50, cmap='Greys', edgecolor='w')
+            axes[0].set_title("Horizontal Angles ($\degree$)")
+            axes[0].set_xlabel("Orientation ($\degree$)")
+            axes[1].hist2d(interommatidial_data.orientation * 180 / np.pi,
+                            interommatidial_data.angle_v * 180 / np.pi,
+                            color='k', bins=50, cmap='Greys', edgecolor='w')
+            axes[1].set_title("Vertical Angles ($\degree$)")
+            axes[1].set_xlabel("Orientation ($\degree$)")
+            plt.tight_layout()
+            plt.show()
+            # plot the total IO angle per orientation
+            fig, axes = plt.subplots(ncols=1)
+            axes.hist2d(interommatidial_data.orientation * 180 / np.pi,
+                            interommatidial_data.angle_total * 180 / np.pi,
+                            color='k', bins=50, cmap='Greys', edgecolor='w')
+            axes.set_title("Total IO Angles ($\degree$)")
+            axes.set_xlabel("Orientation ($\degree$)")
+            plt.tight_layout()
+            plt.show()            
+        # store the dataset
+        csv_filename = os.path.join(self.dirname, "interommatidial_data.csv")
+        interommatidial_data.to_csv(csv_filename, index=False)
+        interommatidial_data.to_pickle(csv_filename.replace(".csv", ".pkl"))
+
+
+    def plot_raw_data(self, three_d=False):
+        """Function for plotting the imported data with a 3D option.
+
+
+        Parameters
+        ----------
+        three_d : bool, default=False
+            Whether to use pyqtgraph to plot the data in 3D.
+        """
+        if three_d:
+        # show the 3D scatterplot
+            scatter = ScatterPlot3d(self.points[:], title="Imported Stack")
+            scatter.show()
+        # show the 2D scatterplot, color coding the 3rd dimension
+        xs, ys, zs = self.points[:].T
+        order = np.argsort(zs)
+        scatter = plt.scatter(xs[order], ys[order], c=zs[order],
+                              alpha=.1, marker='.')
+        plt.gca().set_aspect('equal')
+        plt.colorbar()
+        plt.show()
+
+
+    def plot_cross_section(self, three_d=False, residual_proportion=.5):
+        """Plot the points near the cross section fit along the eye surface.
+
+
+        Parameters
+        ----------
+        three_d : bool, default=False
+            Whether to use pyqtgraph to plot the cross section in 3D.
+        residual_proportion : float, default
+            Proportion of the residuals to include in cross section, 
+            affecting its thickness.
+        """
+        # show points around residuals
+        percentage = residual_proportion * 100 # convert
+        low, high = np.percentile(self.residual[:], [50 - percentage/2, 50 + percentage/2])
+        include = (self.residual[:] > low) * (self.residual[:] < high)
+        include = np.where(include)[0]
+        cross_section = self.points[:]
+        cross_section = cross_section[include]
+        theta = self.theta[include]
+        phi = self.phi[include]
+        resids = self.residual[:]
+        if three_d:
+            # in 3d
+            scatter = ScatterPlot3d(cross_section, colorvals=resids[include],
+                                    title="Cross Section Residuals", size=2)
+            scatter.show()
+        # in spherical coordinates
+        fig = plt.figure()
+        gridspec = fig.add_gridspec(ncols=2, nrows=1, width_ratios=[9, 1])
+        img_ax = fig.add_subplot(gridspec[0, 0])
+        colorbar_ax = fig.add_subplot(gridspec[0, 1])
+        vmin, vmax = low, high
+        img_ax.scatter(self.theta[:], self.phi[:], c=self.residual[:],
+                       alpha=.5, marker='.', edgecolor='none')
+        img_ax.set_title("Cross Section Residuals")
+        colorbar_histogram(resids, vmin=resids.min(), vmax=resids.max(),
+                           ax=colorbar_ax, bin_number=25, colormap='viridis')
+        colorbar_ax.set_ylabel(f"Residuals (N={len(resids)})",
+                               rotation=270)
+        colorbar_ax.get_yaxis().labelpad = 15
+        img_ax.set_aspect('equal')
+        plt.show()
+
+
+    def plot_ommatidial_clusters(self, three_d=False):
+        """Plot the ommatidial clusters, color coded by cluster.
+
+
+        Parameters
+        ----------
+        three_d : bool, default=False
+            Whether to use pyqtgraph to plot the cross section in 3D.
+        """
+        # plot the points in 3D, color coded with the new labels
+        # scramble the labels to avoid clumping
+        lbls = self.labels[:]
+        # check for outliers based on first differences
+        diffs = np.diff(sorted(lbls))
+        # note: lbls often includes a huge number from recoding negative numbers
+        lbls_set = np.arange(max(lbls) + 1)
+        # randomize lbls and use 
+        scrambled_lbls = np.random.permutation(lbls_set)
+        new_lbls = scrambled_lbls[lbls]
+        if three_d:
+            # plot in 3d
+            scatter = ScatterPlot3d(
+                self.points[:], colorvals=new_lbls, cmap=plt.cm.tab20,
+                title="Ommatidial Cluters")
+            scatter.show()
+        # and in 2d
+        plt.scatter(self.theta, self.phi, c=new_lbls, cmap='tab20')
+        plt.gca().set_aspect('equal')
+        plt.show()
+
+
+    def plot_ommatidial_data(self, three_d=False):
+        """Plot the ommatidial lens volume, lens area, IO angle, and skewness.
+
+
+        Parameters
+        ----------
+        three_d : bool, default=False
+            Whether to use pyqtgraph to plot the cross section in 3D.
+        """
+        data = self.ommatidial_data
+        theta, phi, x, y, z = data[['theta', 'phi', 'x', 'y', 'z']].values.T
+        pts = np.array([x, y, z]).T
+        vars_to_plot = ['size', 'lens_area', 'spherical_IOA', 'skewness']
+        # store 3D scatterplots to 
+        scatters_3d = []
+        for num, var in enumerate(vars_to_plot):
+            # in 2D:
+            # plot as subplots in a 2x2 grid
+            colorvals = data[var].values
+            # Remove any nans
+            no_nans = np.isnan(colorvals) == False
+            # plot subplot
+            ax = plt.subplot(2, 2, num + 1)
+            plt.sca(ax)
+            scatter = ax.scatter(
+                theta[no_nans], phi[no_nans],
+                c=colorvals[no_nans], cmap='viridis', marker='.',
+                edgecolor='none')
+            # formatting
+            ax.set_aspect('equal')
+            plt.colorbar(scatter)
+            sbn.despine(ax=ax, bottom=True, left=True)
+            ax.set_title(var)
+            # in 3D:
+            if three_d:
+                scatter = ScatterPlot3d(
+                    pts[no_nans], colorvals=colorvals[no_nans], title=var, size=10)
+                scatters_3d += [scatter]
+        plt.tight_layout()
+        plt.show()
+        # plot 3d plots one at a time
+        for scatter in scatters_3d:
+            scatter.show()
+
+
+    def plot_interommatidial_data(self, three_d=False):
+        """Plot the interommatidial data
+
+
+        Parameters
+        ----------
+        three_d : bool, default=False
+            Whether to use pyqtgraph to plot the cross section in 3D.
+        """
+        interommatidial_data = self.interommatidial_data
+        orientation = abs(interommatidial_data.orientation)
+        CMAP = 'Greys'
+        angles = interommatidial_data.angle_total.values * 180 / np.pi
+        x1, y1, z1 = interommatidial_data[['pt1_x', 'pt1_y', 'pt1_z']].values.T
+        x2, y2, z2 = interommatidial_data[['pt2_x', 'pt2_y', 'pt2_z']].values.T
+        x, y, z = (x1+x2)/2, (y1+y2)/2, (z1+z2)/2
+        arr = np.array([x, y, z]).T
+        polar = rectangular_to_spherical(arr)
+        theta, phi, radii = polar.T
+        BINS = np.linspace(0, angles.max(), 50)
+        BINS = 50
+        # plot the horizontal and vertical IO angle components
+        fig, axes = plt.subplots(ncols=2)
+        axes[0].hist2d(orientation * 180 / np.pi,
+                       interommatidial_data.angle_h * 180 / np.pi,
+                       color='k', bins=BINS, cmap=CMAP, edgecolor='none')
+                       # norm=colors.LogNorm())
+        axes[0].set_title("Horizontal Angles ($\degree$)")
+        axes[0].set_xlabel("Orientation ($\degree$)")
+        axes[1].hist2d(orientation * 180 / np.pi,
+                       interommatidial_data.angle_v * 180 / np.pi,
+                       color='k', bins=BINS, cmap=CMAP, edgecolor='none')
+                       # norm=colors.LogNorm())
+        axes[1].set_title("Vertical Angles ($\degree$)")
+        axes[1].set_xlabel("Orientation ($\degree$)")
+        plt.tight_layout()
+        plt.show()
+        # plot the total IO angle per orientation
+        fig = plt.figure()
+        gridspec = fig.add_gridspec(ncols=2, nrows=1, width_ratios=[4, 1])
+        img_ax = fig.add_subplot(gridspec[0, 0])
+        colorbar_ax = fig.add_subplot(gridspec[0, 1])
+        img_ax.hist2d(orientation * 180 / np.pi,
+                      angles,
+                      color='k', bins=BINS, cmap=CMAP, edgecolor='none')
+                             # norm=colors.LogNorm())
+        # sbn.distplot(angles, vertical=True, ax=colorbar_ax, bins=BINS)
+        # colorbar_histogram(angles, vmin=angles.min(), vmax=angles.max(),
+        #                    bin_number=50, ax=colorbar_ax, colormap=CMAP)
+        colorbar_ax.hist(angles, bins=BINS, orientation='horizontal', color='k', alpha=1)
+        colorbar_ax.set_ylim(0, angles.max())
+        img_ax.set_title("Total IO Angles ($\degree$)")
+        img_ax.set_xlabel("Orientation ($\degree$)")
+        img_ax.set_ylim(0, angles.max())
+        plt.tight_layout()
+        plt.show()            
+        # plot all of the interommatidial pairs, color coded by the total angle
+        # get polar coordinates of the centers
+        th1, ph1 = interommatidial_data[['pt1_th', 'pt1_ph']].values.T
+        th2, ph2 = interommatidial_data[['pt2_th', 'pt2_ph']].values.T
+        th, ph = (th1+th2)/2, (ph1+ph2)/2, 
+        fig = plt.figure()
+        gridspec = fig.add_gridspec(ncols=2, nrows=1, width_ratios=[4, 1])
+        # horizontal IO
+        img_ax = fig.add_subplot(gridspec[0, 0])
+        colorbar_ax = fig.add_subplot(gridspec[0, 1])
+        summary = VarSummary(
+            th * 180/np.pi, ph * 180 / np.pi, angles, color_label='Total IO Angle',
+            suptitle=f"Total IO Angle (N{len(angles)})")
+        summary.plot()
+        plt.show()
+        # and in 3d:
+        if three_d:
+            scatter = ScatterPlot3d(arr, colorvals=angles, size=5,
+                                    title=f"Total IO Angle (N{len(angles)})")
+            scatter.show()
 
 
     def ommatidia_detecting_algorithm(self, polar_clustering=True,
-                                      display=False, test=False):
+                                      display=False, test=False, three_d=False):
         """Apply the 3D ommatidia detecting algorithm (ODA-3D).
         
 
@@ -3668,6 +4291,13 @@ class CTStack(Stack):
         polar_clustering : bool, default=True
             Whether to use spectral clustering or to simply use 
             the nearest cluster center for finding ommatidial clusers.
+        display : bool, default=False
+            Whether to display the data. Combine with three_d to 
+            plot in 3D.
+        test : bool, default=False
+            Whether to run segments designed for troubleshooting.
+        three_d : bool, default=False
+            Whether to use pyqtgraph to plot the data in 3D.
         """
         # 0. check the status of this project and offer to skip forward
         stage = 0
@@ -3703,9 +4333,7 @@ class CTStack(Stack):
             self.import_stack(low, high)
             self.save_database()
             if display:
-                # show the 3D scatterplot
-                scatter = ScatterPlot3d(self.points[:], title="Imported Stack")
-                scatter.show()
+                self.plot_raw_data(three_d)
         print("\nStack imported.")
         # 2. get cross sectional shell and 
         if stage < 2:
@@ -3713,113 +4341,28 @@ class CTStack(Stack):
             self.save_database()
             if display:
                 # show points within 50% of residuals
-                low, high = np.percentile(self.residual[:], [25, 75])
-                include = (self.residual[:] > low) * (self.residual[:] < high)
-                include = np.where(include)
-                cross_section = self.points[:]
-                cross_section = cross_section[include[0]]
-                scatter = ScatterPlot3d(cross_section,
-                                        title="Cross Sectional Surface")
-                # breakpoint()
-                # plt.scatter(self.theta[include[0]], self.phi[include[0]],
-                #             c=self.residual[include[0]])
-                # plt.gca().set_aspect('equal')
-                # plt.show()
-                scatter.show()
+                self.plot_cross_section(three_d, residual_proportion=.5)
         print("\nCross-section loaded.")
         # 3. find the clusters corresponding to ommatidia
         if stage < 3:
             self.find_ommatidial_clusters(polar_clustering=polar_clustering)
             self.save_database()
             if display:
-                # plot the points in 3D, color coded with the new labels
-                # scramble the labels to avoid clumping
-                lbls = self.labels[:]
-                lbls_set = np.arange(max(lbls) + 1)
-                # randomize lbls and use 
-                scrambled_lbls = np.random.permutation(lbls_set)
-                new_lbls = scrambled_lbls[lbls]
-                # plot in 3d
-                scatter = ScatterPlot3d(
-                    self.points[:], colorvals=new_lbls, cmap=plt.cm.tab20,
-                    title="Ommatidial Cluters")
-                scatter.show()
-                # and in 2d
-                plt.scatter(self.theta, self.phi, c=new_lbls, cmap='tab20')
-                plt.gca().set_aspect('equal')
-                plt.show()
+                self.plot_ommatidial_clusters(three_d)
         print("\nOmmatidial clusters loaded.")
         # 4. measure the ommatidia using their cluster properties
         if stage < 4:
             self.measure_ommatidia()
             self.save_database()
             if display:
-                # plot the cluster centers colored by different parameters:
-                ## size
-                ## lens area
-                ## spherical IO angle (from diameter)
-                ## skewness
-                data = self.ommatidial_data
-                theta, phi, x, y, z = data[['theta', 'phi', 'x', 'y', 'z']].values.T
-                pts = np.array([x, y, z]).T
-                vars_to_plot = ['size', 'lens_area', 'spherical_IOA', 'skewness']
-                # store 3D scatterplots to 
-                scatters_3d = []
-                for num, var in enumerate(vars_to_plot):
-                    # in 2D:
-                    # plot as subplots in a 2x2 grid
-                    colorvals = data[var].values
-                    # remove any nans
-                    no_nans = np.isnan(colorvals) == False
-                    # plot subplot
-                    ax = plt.subplot(2, 2, num + 1)
-                    plt.sca(ax)
-                    scatter = ax.scatter(
-                        theta[no_nans], phi[no_nans],
-                        c=colorvals[no_nans], cmap='viridis', marker='.')
-                    # formatting
-                    ax.set_aspect('equal')
-                    plt.colorbar(scatter)
-                    sbn.despine(ax=ax, bottom=True, left=True)
-                    ax.set_title(var)
-                    # in 3D:
-                    scatter = ScatterPlot3d(
-                        pts[no_nans], colorvals=colorvals[no_nans], title=var, size=10)
-                    scatters_3d += [scatter]
-                plt.tight_layout()
-                plt.show()
-                # plot 3d plots one at a time
-                for scatter in scatters_3d:
-                    scatter.show()
-        # if stage < 5:
-        #     self.measure_interommatidia(test=test)
-        #     self.save_database()
-        #     if display:
-        #         data = self.interommatidial_data
-        #         breakpoint()
-        #         theta, phi, x, y, z = data[['theta', 'phi', 'x', 'y', 'z']].values.T
-        #         pts = np.array([x, y, z]).T
-        #         vars_to_plot = ['size', 'lens_area', 'spherical_IOA', 'skewness']
-        #         # store 3D scatterplots to 
-        #         scatters_3d = []
-        #         for num, var in enumerate(vars_to_plot):
-        #             # in 2D:
-        #             # plot as subplots in a 2x2 grid
-        #             colorvals = data[var].values
-        #             ax = plt.subplot(2, 2, num + 1)
-        #             plt.sca(ax)
-        #             scatter = ax.scatter(theta, phi, c=colorvals, cmap='viridis', marker='.')
-        #             ax.set_aspect('equal')
-        #             plt.colorbar(scatter)
-        #             sbn.despine(ax=ax, bottom=True, left=True)
-        #             ax.set_title(var)
-        #             # in 3D:
-        #             scatter = ScatterPlot3d(
-        #                 pts, colorvals=colorvals, title=var, size=10)
-        #             scatters_3d += [scatter]
-        #         plt.tight_layout()
-        #         plt.show()
-        #         # plot 3d plots one at a time
-        #         for scatter in scatters_3d:
-        #             scatter.show()
+                self.plot_ommatidial_data(three_d)
+        print("\nOmmatidial data loaded.")
+        # 5. measure interommatidial pairs using their centers and longitudinal axes
+        if stage < 5:
+            self.measure_interommatidia_fast(test=test)
+            self.save_database()
+            if display:
+                data = self.interommatidial_data
+        self.plot_interommatidial_data(three_d=three_d)
             
+    

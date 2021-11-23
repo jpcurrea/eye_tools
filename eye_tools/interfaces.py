@@ -1,9 +1,11 @@
-import os
-import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.widgets import Slider, Button, RadioButtons, TextBox
 from matplotlib.backend_bases import NavigationToolbar2
+import numpy as np
+import os
 import PIL
+import scipy
+import seaborn as sbn
 from tempfile import mkdtemp
 
 from PyQt5.QtWidgets import QWidget, QFileDialog, QApplication
@@ -15,6 +17,214 @@ import pyqtgraph as pg
 
 if 'app' not in globals():
     app = QApplication([])
+
+
+# make a class for plotting a heatmap with distplots along the axes
+class VarSummary():
+    def __init__(self, xs, ys, colorvals, cmap='viridis', image_size=10**5,
+                 color='k', center=True, color_label="Color", suptitle="Title",
+                 vmin=None, vmax=None):
+        self.vmin = vmin
+        self.vmax = vmax
+        self.x = xs
+        self.y = ys
+        self.pts = np.array([xs, ys]).T
+        self.center = center
+        if self.center:
+            self.x_offset = self.x.mean()
+            self.y_offset = self.y.mean()
+            self.x -= self.x_offset
+            self.y -= self.y_offset
+            self.pts -= self.pts.mean(0)
+        self.colorvals = colorvals
+        self.image_size = image_size
+        self.cmap = cmap
+        self.color = color
+        self.color_label = color_label
+        self.suptitle = suptitle
+
+    def plot(self):
+        x_range = self.x.max() - self.x.min()
+        y_range = self.y.max() - self.y.min()
+        # figure out side lengths needed for input image size
+        ratio = y_range / x_range
+        x_len = int(np.round(np.sqrt(self.image_size/ratio)))
+        # get x and y ranges corresponding to image size
+        xs = np.linspace(self.x.min(), self.x.max(), x_len)
+        self.raster_pixel_length = xs[1] - xs[0]
+        ys = np.arange(self.y.min(), self.y.max(), self.raster_pixel_length)
+        xs = xs[:-1] + (self.raster_pixel_length / 2.)
+        ys = ys[:-1] + (self.raster_pixel_length / 2.)
+        xvals, yvals = np.meshgrid(xs, ys)
+        self.xmin, self.xmax = xs.min(), xs.max()
+        self.ymin, self.ymax = ys.min(), ys.max()
+        self.xpad = .05 * (abs(self.xmax - self.xmin))
+        self.ypad = .05 * (abs(self.ymax - self.ymin))
+        self.xmin, self.xmax = self.xmin - self.xpad, self.xmax + self.xpad
+        self.ymin, self.ymax = self.ymin - self.ypad, self.ymax + self.ypad
+        # split figure into axes using a grid
+        ratio = (self.ymax - self.ymin) / (self.xmax - self.xmin)
+        width = 1 + 4 + .3
+        height = 1 + 4 * ratio
+        scale = 7/width
+        self.fig = plt.figure(figsize=(scale * width, scale * height))
+        self.gridspec = self.fig.add_gridspec(
+            ncols=3, nrows=2,
+            width_ratios=[1, 4, .3],
+            height_ratios=[4*ratio, 1],
+            wspace=0, hspace=0)
+        # calculate ideal range for colorvals to share between vertical and horizontal axes
+        cmin, cmax = self.colorvals.min(), self.colorvals.max()
+        pad = .025 * (cmax - cmin)
+        cmin -= pad
+        cmax += pad
+        self.cmin = cmin
+        self.cmax = cmax
+        # generate ticks for colorvals
+        crange = cmax - cmin
+        scale = np.round(np.log10(crange))
+        cticks = np.linspace(np.round(cmin,  - int(scale - 1)),
+                             np.round(cmax,  - int(scale - 1)), 4)[1:-1]
+        # plot 2d heatmap
+        self.heatmap_ax = self.fig.add_subplot(self.gridspec[0, 1])
+        no_nans = np.isnan(self.colorvals) == False
+        grid = scipy.interpolate.griddata(self.pts[no_nans],
+                                          self.colorvals[no_nans],
+                                          np.array([xvals, yvals]).T,
+                                          method='linear')
+        no_nans = np.isnan(grid) == False
+        self.plot_heatmap(xs, ys, grid)
+        # self.heatmap_ax.set_title(self.suptitle)
+        # make colorbar/histogram
+        self.colorbar_ax = self.fig.add_subplot(self.gridspec[0, 2])
+        bins = np.linspace(cmin, cmax, 101)
+        counts, bin_edges = np.histogram(self.colorvals, bins=bins)
+        self.histogram = sbn.distplot(self.colorvals, kde=False, color=self.color,
+                                      ax=self.colorbar_ax, vertical=True, bins=bins,
+                                      axlabel=False)
+        bin_edges = np.repeat(bins, 2)[1:-1]
+        heights = np.repeat(counts, 2)
+        self.colorbar_ax.plot(heights, bin_edges, color='w')
+        vals = np.linspace(cmin, cmax, 100)
+        self.colorbar_ax.pcolormesh([0, counts.max()], vals,
+                                    vals[:, np.newaxis], cmap=self.cmap,
+                                    zorder=0)
+        # self.colorbar_ax.set_xlabel("Count")
+        sbn.despine(ax=self.colorbar_ax, bottom=False)
+        self.colorbar_ax.set_xticks([])
+        self.colorbar_ylabel = self.colorbar_ax.set_ylabel(
+            self.color_label, rotation=270, labelpad=20)
+        self.colorbar_ax.yaxis.set_label_position("right")
+        self.colorbar_ax.yaxis.tick_right()
+        # self.colorbar_ylabel.set_rotation(270)
+        # plot expected colorvals using bootstrapped CIs along vertical
+        self.vertical_ax = self.fig.add_subplot(self.gridspec[0, 0],
+                                                sharey=self.heatmap_ax)
+        lows, mids, highs = [], [], []
+        no_nans = np.isnan(grid.T) == False
+        for row, no_nan in zip(grid.T, no_nans):
+            # low, mid, high = bootstrapped_CI(row)
+            low, mid, high = np.percentile(row[no_nan], [16, 50, 84])
+            lows += [low]
+            mids += [mid]
+            highs += [high]
+        # self.vertical_means = np.nanmean(grid, axis=0)
+        # self.vertical_stds = np.nanstd(grid, axis=0)
+        # self.vertical_std_err = 2 * self.vertical_stds / np.sqrt(no_nans.sum(0))
+        # self.vertical_ax.plot(self.vertical_means, ys, color=self.color)
+        # self.vertical_ax.fill_betweenx(
+        #     ys, self.vertical_means - self.vertical_stds,
+        #     self.vertical_means + self.vertical_stds,
+        #     alpha=.2, color=self.color, ec="", lw=0)
+        self.vertical_ax.plot(mids, ys, color=self.color)
+        self.vertical_ax.fill_betweenx(
+            ys, lows, highs, alpha=.2, color=self.color, edgecolor="none", lw=0)
+        self.vertical_ax.set_ylim(self.ymin, self.ymax)
+        self.vertical_ax.set_xlim(cmin, cmax)
+        self.vertical_ax.set_xticks(cticks)
+        self.vertical_ax.set_ylabel("Elevation ($^\circ$)")
+        sbn.despine(ax=self.vertical_ax)
+        # self.vertical_ax.set_xlabel(self.color_label)
+        # plot expected colorvals using bootstrapped CIs along horizontal
+        self.horizontal_ax = self.fig.add_subplot(self.gridspec[1, 1],
+                                                  sharex=self.heatmap_ax)
+        lows, mids, highs = [], [], []
+        no_nans = np.isnan(grid) == False
+        for col, no_nan in zip(grid, no_nans):
+            # low, mid, high = bootstrapped_CI(col)
+            low, mid, high = np.percentile(col[no_nan], [16, 50, 84])
+            lows += [low]
+            mids += [mid]
+            highs += [high]
+        # self.horizontal_means = np.nanmean(grid, axis=1)
+        # self.horizontal_stds = np.nanstd(grid, axis=1)
+        # self.horizontal_std_err = 2 * self.horizontal_stds / np.sqrt(no_nans.sum(1))
+        # self.horizontal_ax.plot(xs, self.horizontal_means, color=self.color)
+        # self.horizontal_ax.fill_between(
+        #     xs, self.horizontal_means - self.horizontal_stds,
+        #     self.horizontal_means + self.horizontal_stds,
+        #     alpha=.2, color=self.color, ec="", lw=0)
+        self.horizontal_ax.plot(xs, mids, color=self.color)
+        self.horizontal_ax.fill_between(
+            xs, lows, highs, alpha=.2, color=self.color, edgecolor="none", lw=0)
+        self.horizontal_ax.set_xlim(self.xmin, self.xmax)
+        # self.horizontal_ax.set_ylabel(self.color_label)
+        self.horizontal_ax.set_yticks(cticks)
+        sbn.despine(ax=self.horizontal_ax)
+        self.horizontal_ax.set_ylim(cmin, cmax)
+        self.horizontal_ax.set_xlabel("Azimuth ($^\circ$)")
+        plt.suptitle(self.suptitle)
+        # plt.tight_layout()
+
+    def plot_heatmap(self, xs, ys, grid):
+        # self.heatmap = self.heatmap_ax.scatter(
+        #     self.x, self.y, c=self.colorvals, cmap=self.cmap,
+        #     vmin=self.cmin, vmax=self.cmax)
+        if self.vmin is not None:
+            cmin = self.vmin
+        else:
+            cmin = self.cmin
+        if self.vmax is not None:
+            cmax = self.cmax
+        else:
+            cmax = self.cmax
+        self.heatmap = self.heatmap_ax.pcolormesh(
+            xs, ys, grid.T, cmap=self.cmap, antialiased=True,
+            vmin=cmin, vmax=cmax)
+        self.heatmap_ax.set_aspect('equal')
+        self.heatmap_ax.set_xlim(self.xmin, self.xmax)
+        self.heatmap_ax.set_ylim(self.ymin, self.ymax)
+        sbn.despine(ax=self.heatmap_ax, bottom=True, left=True)
+        self.heatmap_ax.label_outer()
+        self.heatmap_ax.tick_params(axis=u'both', which=u'both',length=0)
+
+class VarSummary_lines(VarSummary):
+    def __init__(self, xs, ys, colorvals, cmap='viridis', image_size=10**5,
+                 color='k', center=True, color_label="Color", suptitle="Title",
+                 xs1=None, xs2=None, ys1=None, ys2=None):
+        self.xs1, self.xs2, self.ys1, self.ys2 = xs1, xs2, ys1, ys2
+        VarSummary.__init__(self, xs, ys, colorvals, cmap='viridis',
+                            image_size=10**5, color='k', center=True,
+                            color_label="Color", suptitle="Title")
+        if self.center:
+            self.xs1 -= self.x_offset
+            self.xs2 -= self.x_offset
+            self.ys1 -= self.y_offset
+            self.ys2 -= self.y_offset
+
+    def plot_heatmap(self, *args):
+        cmap = plt.cm.get_cmap(self.cmap)
+        self.heatmap = []
+        for x1, x2, y1, y2, cval in zip(self.xs1, self.xs2, self.ys1,
+                                        self.ys2, self.colorvals):
+            prop = (cval - self.cmin)/(self.cmax - self.cmin)
+            self.heatmap_ax.plot([x1, x2], [y1, y2], color=cmap(prop))
+        self.heatmap_ax.set_aspect('equal')
+        self.heatmap_ax.set_xlim(self.xmin, self.xmax)
+        self.heatmap_ax.set_ylim(self.ymin, self.ymax)
+        sbn.despine(ax=self.heatmap_ax, bottom=True, left=True)
+        self.heatmap_ax.label_outer()
+        self.heatmap_ax.tick_params(axis=u'both', which=u'both',length=0)
 
 
 class ScatterPlot3d():
