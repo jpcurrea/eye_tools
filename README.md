@@ -3,11 +3,13 @@
 
 My graduate school mentor once challenged me to count the ommatidia of the eyes of vinegar flies (_Drosophila melanogaster_). I quickly learned that vinegar flies have two compound eyes, each composed of _hundreds_ of light collecting facets called ommatidia. As in the diagram below, each facet sits immediately adjacent to the next, separated by screening pigment. 
 
+As a result, the angle separating neighboring ommatidia determines roughly the smallest resolvable detail (narrower -> higher resolution). Each ommatidium collects an approximate pixel captured by the retina so that large ommatidia have greater sensitivity to low light levels. So by knowing the number and size of ommatidia, we can figure out a good deal about their spatial resolution and light sensitivity. 
+
+
 |![Image](figs/resolution.png)|
 |:--:|
-|*Resolution in compound and camera-type eyes is determined by the angle separating adjacent photoreceptor units. The camera-type eye can have a higher spatial resolution because one lens serves the whole retina. For the compound eye to acheive the same resolution as our eyes, for instance, they would need to be at least 1 meter in diameter and composed of millions of ommatidia!*|
+|*The camera-type eye can have a higher spatial resolution because one lens serves the whole retina. For the compound eye to acheive the same resolution as our eyes, for instance, they would need to be at least 1 meter in diameter and composed of millions of ommatidia!*|
 
-As a result, the angle separating neighboring ommatidia determines roughly the smallest resolvable detail (narrower -> higher resolution). Each ommatidium collects an approximate pixel captured by the retina so that large ommatidia have greater sensitivity to low light levels. So by knowing the number and size of ommatidia, we can figure out a good deal about their spatial resolution and light sensitivity. 
 
 
 And counting ommatidia is a worthwile endevour! Compound eyes are wielded by 
