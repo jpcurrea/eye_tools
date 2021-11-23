@@ -1,18 +1,13 @@
 # Compound Eye Tools
 ## On Counting Ommatidia
 
-My graduate school mentor once challenged me to count the ommatidia of the eyes of vinegar flies (_Drosophila melanogaster_). I quickly learned that vinegar flies have two compound eyes, each composed of _hundreds_ of light collecting facets called ommatidia. As in the diagram below, each facet sits immediately adjacent to the next, separated by screening pigment. 
-
-As a result, the angle separating neighboring ommatidia determines roughly the smallest resolvable detail (narrower -> higher resolution). Each ommatidium collects an approximate pixel captured by the retina so that large ommatidia have greater sensitivity to low light levels. So by knowing the number and size of ommatidia, we can figure out a good deal about their spatial resolution and light sensitivity. 
-
+My graduate school mentor once challenged me to count the ommatidia of the eyes of vinegar flies (_Drosophila melanogaster_). I quickly learned that vinegar flies have two compound eyes, each composed of _hundreds_ of light collecting facets called ommatidia. As in the diagram below, each facet sits immediately adjacent to the next, separated by screening pigment. As a result, the angle separating neighboring ommatidia determines roughly the smallest resolvable detail (narrower -> higher resolution), just like the inter-receptor angle in camera-type eyes like our own. Each ommatidium collects an approximate pixel of the image captured by the retina so that large ommatidia offer greater sensitivity to low light levels. By knowing the number and size of ommatidia, we can figure out a good deal about an animal's spatial resolution and light sensitivity. 
 
 |![Image](figs/resolution.png)|
 |:--:|
 |*The camera-type eye can have a higher spatial resolution because one lens serves the whole retina. For the compound eye to acheive the same resolution as our eyes, for instance, they would need to be at least 1 meter in diameter and composed of millions of ommatidia!*|
 
-
-
-And counting ommatidia is a worthwile endevour! Compound eyes are wielded by 
+And counting ommatidia is a worthwile endevour! Compound eyes are wielded by arthropods (mostly insects _really_), which represent roughly 80% of described animal species (see wheel of life below
 
 ![Image](figs/biodiversity.png)
 
