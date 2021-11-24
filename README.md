@@ -1,4 +1,7 @@
 # Compound Eye Tools
+
+Here are some programs to automate counting and measuring the ommatidia of compound eyes from images.
+
 ## On Counting Ommatidia
 
 My graduate mentor once challenged me to count the ommatidia of the eyes of vinegar flies (_Drosophila melanogaster_). It turns out that vinegar flies have two compound eyes, each composed of _hundreds_ of light collecting facets called ommatidia. Each one sits immediately adjacent to the next, separated by screening pigment (see below). The angle separating neighboring ommatidia, called the interommatidial angle, determines the smallest resolvable detail like the inter-receptor angle of our own camera-type eyes. Each ommatidium collects an approximate pixel of the image captured by the retina so that large ommatidia offer greater sensitivity to low light levels. So, by counting and measuring ommatidia, we can figure out a great deal about an animal's spatial resolution and light sensitivity. 
