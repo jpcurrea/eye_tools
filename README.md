@@ -1,14 +1,14 @@
 # Compound Eye Tools
 
-This library should help automate counting and measuring the ommatidia of compound eyes from images.
+This library automates counting and measuring the ommatidia of compound eyes from images.
 
 ## On Counting Ommatidia
 
-My graduate mentor once challenged me to count the ommatidia of the eyes of vinegar flies (_Drosophila melanogaster_). It turns out that vinegar flies have two compound eyes, each composed of _hundreds_ of light collecting facets called ommatidia. I learned this very quickly as I counted the ommatidia of over 100 flies, amounting to over 90,000 ommatidia!
+My graduate mentor once challenged me to count the ommatidia of the eyes of vinegar flies (_Drosophila melanogaster_). It turns out that vinegar flies have two compound eyes, each composed of _hundreds_ of light collecting facets called ommatidia. I learned this very quickly as I counted the ommatidia of over 100 flies, amounting to over 90,000 ommatidia (and a publication in !
 
-|![Image](figs/count_demo.png)|
+|![<img src=figs/count_demo.png>](figs/count_demo.png)|
 |:--:|
-|*There are over 90,000 ommatidia from the over 100 flies that I counted by hand! Notice how the geometric arrangement allows one to count large chunks of ommatiida without having to count individual ones.*|
+|*I counted over 90,000 ommatidia from over 100 flies by hand! The geometric arrangement made it possible to count large triangles of ommatiida without having to count singletons.*|
 
 This a greuling task that many have braved before me. But why? Counting ommatidia is actually a worthwile endevour. Compound eyes are wielded by arthropods (mostly insects _really_), which represent roughly 80% of described animal species, occupying every ecological niche on Earth. They also come in a range of shapes and sizes, having adapted to different selective pressures. So if you want to understand how vision works, develops, and evolves, you have to study compound eyes. 
 
