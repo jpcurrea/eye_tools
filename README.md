@@ -22,6 +22,10 @@ Plus, as opposed to our camera-type eyes, many of the structures limiting the vi
 |:--:|
 |*The camera-type eye can have a higher spatial resolution because one lens serves the whole retina. For the compound eye to acheive the same resolution as our eyes, for instance, they would need to be at least 1 meter in diameter and composed of millions of ommatidia!*|
 
+<<<<<<< HEAD
 But wouldn't it be nice if a program could count them automatically? Humanity's developed programs that can beat grand champions in chess or generate fake videos of past presidents. If we can automate driving cars or facial recognition, shouldn't we be able to automate ommatidia recognition? Allow me to introduce the
 
 ## Ommatidia Detecting Algorithm (ODA) 
+=======
+But wouldn't it be nice if a program could count them automatically? Humanity's developed programs that can beat grand champions in chess or generate fake videos of past presidents. If we can automate driving cars or facial recognition, shouldn't we be able to automate ommatidia recognition?
+>>>>>>> 73bf6cd9dfe8257e0b9af2f6d33c59972cb36994
