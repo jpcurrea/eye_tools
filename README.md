@@ -14,7 +14,7 @@ Many have braved this greuling task of counting ommatidia because, among other t
 
 |![Image](figs/biodiversity.png)|
 |:--:|
-|*The Pie of Life: note the large blue pie representing the arthropods (pronounced _insects_)*|
+|*The Pie of Life: note the large blue pie representing the arthropods (pronounced "insects")*|
 
 Plus, as opposed to our camera-type eyes, many of the structures limiting the visual performance of compound eyes can be measured in direct external images. The number and size of ommatidia of a compound eye set physical limitations on what they can see. Each ommatidium collects an approximate pixel of the image captured by the retina and sits immediately adjacent to the next, separated by screening pigment (see below). The angle separating neighboring ommatidia, called the interommatidial angle, determines the smallest resolvable detail just like the inter-receptor angle of our own camera-type eyes. Also, the size of the ommatidial aperture limits the amount of light available for absorption so that large ommatidia offer greater sensitivity to low light levels. By counting and measuring ommatidia, we can figure out a great deal about an animal's spatial resolution and light sensitivity. 
 
@@ -22,4 +22,6 @@ Plus, as opposed to our camera-type eyes, many of the structures limiting the vi
 |:--:|
 |*The camera-type eye can have a higher spatial resolution because one lens serves the whole retina. For the compound eye to acheive the same resolution as our eyes, for instance, they would need to be at least 1 meter in diameter and composed of millions of ommatidia!*|
 
-But wouldn't it be nice if a program could count them automatically? Humanity's developed programs that can beat grand champions in chess or generate fake videos of past presidents. If we can automate driving cars or facial recognition, shouldn't we be able to automate ommatidia recognition?
+But wouldn't it be nice if a program could count them automatically? Humanity's developed programs that can beat grand champions in chess or generate fake videos of past presidents. If we can automate driving cars or facial recognition, shouldn't we be able to automate ommatidia recognition? Allow me to introduce the
+
+## Ommatidia Detecting Algorithm (ODA)
