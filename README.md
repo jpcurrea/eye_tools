@@ -14,7 +14,7 @@ Many have braved this greuling task of counting ommatidia because, among other t
 
 |![Image](figs/biodiversity.png)|
 |:--:|
-|*The Pie of Life: note the large blue pie representing the arthropods (pronounced _insects_)*|
+|*The Pie of Life: note the large blue pie representing the arthropods (pronounced "insects")*|
 
 Plus, as opposed to our camera-type eyes, many of the structures limiting the visual performance of compound eyes can be measured in direct external images. The number and size of ommatidia of a compound eye set physical limitations on what they can see. Each ommatidium collects an approximate pixel of the image captured by the retina and sits immediately adjacent to the next, separated by screening pigment (see below). The angle separating neighboring ommatidia, called the interommatidial angle, determines the smallest resolvable detail just like the inter-receptor angle of our own camera-type eyes. Also, the size of the ommatidial aperture limits the amount of light available for absorption so that large ommatidia offer greater sensitivity to low light levels. By counting and measuring ommatidia, we can figure out a great deal about an animal's spatial resolution and light sensitivity. 
 
