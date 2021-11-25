@@ -24,4 +24,4 @@ Plus, as opposed to our camera-type eyes, many of the structures limiting the vi
 
 But wouldn't it be nice if a program could count them automatically? Humanity's developed programs that can beat grand champions in chess or generate fake videos of past presidents. If we can automate driving cars or facial recognition, shouldn't we be able to automate ommatidia recognition? Allow me to introduce the
 
-## Ommatidia Detecting Algorithm (ODA)
+## Ommatidia Detecting Algorithm (ODA) 
