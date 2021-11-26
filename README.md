@@ -28,7 +28,7 @@ Wouldn't it be nice if a program could count these ommatidia automatically? Huma
 
 |![Image](figs/oda_demo.png)|
 |:--:|
-|*General Pipeline of the ODA (for more info  *|
+|*General Pipeline of the ODA*|
 
 
 ## Installation
