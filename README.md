@@ -30,6 +30,8 @@ Wouldn't it be nice if a program could count these ommatidia automatically? Huma
 |:--:|
 |*General Pipeline of the ODA*|
 
+To get a feel for how the ODA works, try out [this interactive iPython notebook hosted on Binder](https://gesis.mybinder.org/binder/v2/gh/jpcurrea/eye_tools/a6b7b00763c41737e06dbb0fa17474a431fb5124?urlpath=lab%2Ftree%2Fdocs%2FODA%20How%20It%20Works.ipynb).  [![Binder icon](https://mybinder.org/badge_logo.svg)](https://gesis.mybinder.org/binder/v2/gh/jpcurrea/eye_tools/a6b7b00763c41737e06dbb0fa17474a431fb5124?urlpath=lab%2Ftree%2Fdocs%2FODA%20How%20It%20Works.ipynb)]
+
 
 ## Installation
 ## Simple Recipes
