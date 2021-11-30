@@ -779,7 +779,7 @@ class Points():
             self.residuals = self.radii - self.radius
 
     def rasterize(self, polar=True, axes=[0, 1], image_size=10**4,
-                  weights=None):
+                  weights=None, pixel_length=None):
         """Rasterize coordinates onto a grid defined by min and max vals.
 
 
@@ -791,6 +791,9 @@ class Points():
             The number of pixels in the image.
         weights : list, shape=(N, 1), default=None
             Optional weights associated with each point.
+        pixel_length : float, default=None
+            Alternative method of specifying the grid based on the pixel length, as 
+            opposed to image size. This overrides the image size.
 
         Returns
         -------
@@ -810,12 +813,14 @@ class Points():
         y_range = y.max() - y.min()
         # figure out side lengths needed for input image size
         ratio = y_range / x_range
-        # x_len = int(np.round(np.sqrt(image_size/ratio)))
-        # y_len = int(np.round(ratio * x_len))
-        x_len = int(np.round(np.sqrt(image_size/ratio)))
-        # get x and y ranges corresponding to image size
-        xs = np.linspace(x.min(), x.max(), x_len)
-        self.raster_pixel_length = xs[1] - xs[0]
+        if pixel_length is None:
+            x_len = int(np.round(np.sqrt(image_size/ratio)))
+            # get x and y ranges corresponding to image size
+            xs = np.linspace(x.min(), x.max(), x_len)
+            self.raster_pixel_length = xs[1] - xs[0]
+        else:
+            self.raster_pixel_length = pixel_length            
+            xs = np.arange(x.min(), x.max(), self.raster_pixel_length)
         ys = np.arange(y.min(), y.max(), self.raster_pixel_length)
         if weights is None:
             # a simple 2D histogram of the x and y coordinates
@@ -1620,7 +1625,8 @@ class Layer():
         if self.mask is not None:
             # and its not a boolean array, threshold using the mean value 
             if self.mask.dtype is not np.dtype('bool'):
-                self.mask = self.mask > self.mask.mean()
+                # self.mask = self.mask > self.mask.mean()
+                self.mask = self.mask > self.mask.max()/2
             # assume the mask matches the shape of the image
             assert self.mask.shape == self.image.shape[:2], (
                 "input mask should have the same shape as input image. "
@@ -1733,14 +1739,23 @@ class Eye(Layer):
         """
         assert self.mask is not None, (
             f"No boolean mask loaded. First try running {self.load_mask}")
+        # add border of zeros to find contour even in all True image
+        mask = np.zeros(np.array(self.mask.shape)+2, dtype=bool)
+        mask[1:-1, 1:-1] = self.mask
         # find the contours in the mask image
         contour = skimage.measure.find_contours(
-            (255/self.mask.max()) * self.mask.astype(int), 256/2)
+            (255/mask.max()) * mask.astype(int), 256/2)
         # escape if no contours were found
+        if len(contour) == 0:
+            breakpoint()
         assert len(contour) > 0, "could not find enough points in the contour"
         # use the longest contour
-        contour = max(contour, key=len).astype(int)
-        self.eye_outline = np.round(contour).astype(int) # pixel coords
+        contour = max(contour, key=len).astype(float)
+        # recenter points
+        contour -= 1
+        # contour -= contour.min()
+        contour = np.round(contour).astype(int)
+        self.eye_outline = contour # pixel coords
         # make a new mask by filling the contour
         new_mask = np.zeros(self.mask.shape, dtype=int)
         new_mask[contour[:, 0], contour[:, 1]] = 1
@@ -2977,9 +2992,9 @@ class CTStack(Stack):
 
 
     def find_ommatidial_clusters(self, polar_clustering=True,
-                                 window_length=np.pi/8,
+                                 window_length=np.pi/4,
                                  window_pad=np.pi/20,
-                                 image_size=1e5, mask_blur_std=2,
+                                 image_size=1e4, mask_blur_std=2,
                                  square_lattice=False):
         """2D running window applying ODA to spherical projections.
 
@@ -3091,21 +3106,31 @@ class CTStack(Stack):
                                      spherical_conversion=False,
                                      polar=polar)
                     # rasterize an image using the polar 2D histogram
+                    # find the smallest distance to record
+                    dists_tree = spatial.KDTree(sub_segment.polar[:, :2])
+                    dists, inds = dists_tree.query(sub_segment.polar[:, :2], k=2)
+                    min_dist = 2*np.mean(dists[:, 1])
                     raster, (theta_vals, phi_vals) = sub_segment.rasterize(
-                        image_size=image_size)
+                        image_size=image_size, pixel_length=min_dist)
                     # make an Eye object of the raster image to get
                     # ommatidia centers
                     pixel_size = phi_vals[1] - phi_vals[0] # in rads
                     # make a mask using the raster image
                     mask = raster > 0
                     mask = ndimage.gaussian_filter(mask.astype(float), 2)
-                    thresh = np.percentile(mask[mask > 0], 10)
+                    mask /= mask.max()
+                    # thresh = np.percentile(mask[mask > 0], 10)
+                    thresh = .1
                     mask = mask > thresh
+                    mask = 255 * mask.astype(int)
                     raster = 255 * (raster / raster.max())
                     raster = raster.astype('uint8')
                     # apply the ODA to the raster image
-                    eye = Eye(arr=raster, pixel_size=pixel_size,
-                              mask_arr=mask.astype(int), mask_fn=None)
+                    try:
+                        eye = Eye(arr=raster, pixel_size=pixel_size,
+                                  mask_arr=mask, mask_fn=None)
+                    except:
+                        breakpoint()
                     eye.oda(plot=False, square_lattice=square_lattice)
                     # use the ommatidial centers to find the clusters 
                     centers = eye.ommatidia
@@ -3129,17 +3154,6 @@ class CTStack(Stack):
                                 n_init=1)
                             polar = segment.polar
                             lbls = clusterer.fit_predict(polar[:, :2])
-                            if test:
-                                lbls_set = np.arange(max(lbls) + 1)
-                                # randomize lbls and use 
-                                scrambled_lbls = np.random.permutation(lbls_set)
-                                new_lbls = scrambled_lbls[lbls]
-                                fig, ax = plt.subplots()
-                                ax.set_title("polar prediction")
-                                scatter = ax.scatter(polar[:, 0], polar[:, 1], c=new_lbls, cmap='tab20')
-                                plt.colorbar(scatter)
-                                ax.set_aspect('equal')
-                                plt.show()
                         else:
                             # use the nearest points as seeds in the KMeans in 3D
                             # remove centers with unknown radii
@@ -3168,11 +3182,11 @@ class CTStack(Stack):
                         # use original bounds to get centers within window
                         theta, phi, radii = centers_original_polar
                         # azimuth filter
-                        in_window = (theta > theta_low - window_pad/2)
-                        in_window *= (theta <= theta_high + window_pad/2)
+                        in_window = (theta > theta_low)
+                        in_window *= (theta <= theta_high)
                         # elevation filter
-                        in_window *= (phi > phi_low - window_pad/2)
-                        in_window *= (phi <= phi_high + window_pad/2)
+                        in_window *= (phi > phi_low)
+                        in_window *= (phi <= phi_high)
                         # remove non-positive lbls
                         positive = lbls_set > 0
                         in_window *= positive
@@ -4158,14 +4172,18 @@ class CTStack(Stack):
         plt.show()
 
 
-    def plot_ommatidial_data(self, three_d=False):
-        """Plot the ommatidial lens volume, lens area, IO angle, and skewness.
+    def plot_ommatidial_data(self, three_d=False, image_size=1e4, scatter=False):
+        """Plot the ommatidial data (lens area, IO angle, ...) in 2D histograms.
 
 
         Parameters
         ----------
         three_d : bool, default=False
             Whether to use pyqtgraph to plot the cross section in 3D.
+        image_size : float, default=1e4
+            The size of the 2d histogram used for plotting the variables.
+        scatter : bool, default=bool
+            Whether to plot the variable as a scatterplot as opposed to a 2D histogram
         """
         data = self.ommatidial_data
         theta, phi, x, y, z = data[['theta', 'phi', 'x', 'y', 'z']].values.T
@@ -4180,17 +4198,20 @@ class CTStack(Stack):
             # Remove any nans
             no_nans = np.isnan(colorvals) == False
             # plot subplot
-            ax = plt.subplot(2, 2, num + 1)
-            plt.sca(ax)
-            scatter = ax.scatter(
-                theta[no_nans], phi[no_nans],
-                c=colorvals[no_nans], cmap='viridis', marker='.',
-                edgecolor='none')
-            # formatting
-            ax.set_aspect('equal')
-            plt.colorbar(scatter)
-            sbn.despine(ax=ax, bottom=True, left=True)
-            ax.set_title(var)
+            # ax = plt.subplot(2, 2, num + 1)
+            summary = VarSummary(theta[no_nans], phi[no_nans], colorvals,
+                                 suptitle=f"{var} (N={no_nans.sum()})",
+                                 color_label=var, image_size=image_size, scatter=scatter)
+            summary.plot()
+            # scatter = ax.scatter(
+            #     theta[no_nans], phi[no_nans],
+            #     c=colorvals[no_nans], cmap='viridis', marker='.',
+            #     edgecolor='none')
+            # # formatting
+            # ax.set_aspect('equal')
+            # plt.colorbar(scatter)
+            # sbn.despine(ax=ax, bottom=True, left=True)
+            # ax.set_title(var)
             # in 3D:
             if three_d:
                 scatter = ScatterPlot3d(

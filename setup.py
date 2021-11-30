@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(name="eye_tools",
-      version='0.2.0',
+      version='0.2.1',
       description='tools for image analysis, particularly for extracting\
       parameters relevant to the optical performance of compound eyes.',
       url="https://github.com/jpcurrea/compound_eye_tools.git",
@@ -15,5 +15,8 @@ setup(name="eye_tools",
           'scikit-image',
           'pandas',
           'pillow',
+          'h5py',
+          'pyqtgraph',
+          'PyQt5'
       ],
       zip_safe=False)

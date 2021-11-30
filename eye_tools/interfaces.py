@@ -21,9 +21,12 @@ if 'app' not in globals():
 
 # make a class for plotting a heatmap with distplots along the axes
 class VarSummary():
+    """
+    """
+
     def __init__(self, xs, ys, colorvals, cmap='viridis', image_size=10**5,
                  color='k', center=True, color_label="Color", suptitle="Title",
-                 vmin=None, vmax=None):
+                 vmin=None, vmax=None, scatter=False):
         self.vmin = vmin
         self.vmax = vmax
         self.x = xs
@@ -42,6 +45,7 @@ class VarSummary():
         self.color = color
         self.color_label = color_label
         self.suptitle = suptitle
+        self.scatter = scatter
 
     def plot(self):
         x_range = self.x.max() - self.x.min()
@@ -58,8 +62,8 @@ class VarSummary():
         xvals, yvals = np.meshgrid(xs, ys)
         self.xmin, self.xmax = xs.min(), xs.max()
         self.ymin, self.ymax = ys.min(), ys.max()
-        self.xpad = .05 * (abs(self.xmax - self.xmin))
-        self.ypad = .05 * (abs(self.ymax - self.ymin))
+        self.xpad = .1 * (abs(self.xmax - self.xmin))
+        self.ypad = .1 * (abs(self.ymax - self.ymin))
         self.xmin, self.xmax = self.xmin - self.xpad, self.xmax + self.xpad
         self.ymin, self.ymax = self.ymin - self.ypad, self.ymax + self.ypad
         # split figure into axes using a grid
@@ -188,15 +192,20 @@ class VarSummary():
             cmax = self.cmax
         else:
             cmax = self.cmax
-        self.heatmap = self.heatmap_ax.pcolormesh(
-            xs, ys, grid.T, cmap=self.cmap, antialiased=True,
-            vmin=cmin, vmax=cmax)
+        if self.scatter:
+            self.heatmap = self.heatmap_ax.scatter(
+                self.x, self.y, c=self.colorvals, vmin=cmin, vmax=cmax)
+        else:
+            self.heatmap = self.heatmap_ax.pcolormesh(
+                xs, ys, grid.T, cmap=self.cmap, antialiased=True,
+                vmin=cmin, vmax=cmax)
         self.heatmap_ax.set_aspect('equal')
         self.heatmap_ax.set_xlim(self.xmin, self.xmax)
         self.heatmap_ax.set_ylim(self.ymin, self.ymax)
         sbn.despine(ax=self.heatmap_ax, bottom=True, left=True)
         self.heatmap_ax.label_outer()
         self.heatmap_ax.tick_params(axis=u'both', which=u'both',length=0)
+
 
 class VarSummary_lines(VarSummary):
     def __init__(self, xs, ys, colorvals, cmap='viridis', image_size=10**5,
