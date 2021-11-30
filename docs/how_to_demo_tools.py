@@ -8,43 +8,46 @@ from scipy import signal
 from scipy.signal import gaussian
 from skimage import feature
 
+%matplotlib inline
+
 red = (0.7686274509803922, 0.3058823529411765, 0.3215686274509804)
 blue = (0.2980392156862745, 0.4470588235294118, 0.6901960784313725)
 green = (0.3333333333333333, 0.6588235294117647, 0.40784313725490196)
 
 
 class Grating():
-    def __init__(self, sf=1, tf=0, contrast=1, orientation=0,
-                 size=(1000, 1000), window=.2, fov=180, phase=0, ioa=None):
-        """Class for making a sinusoidal grating.
+    """Class for making a sinusoidal grating.
+    
+    
+    Parameters
+    ----------
+    sf : float, default=1
+        The number of oscillations from dark to light per degree 
+        (in cycles/degree).
+    tf : float, default=1
+        The number of oscillations from dark to light per second 
+        (in Hz) for a moving grating.
+    contrast : float, default=1
+        The Michelson contrast between the darkest and lightest values, 
+        amounting to the amplitude of the sinusoidal component.
+    orientation : float, default=0
+        The 2D orientation of the grating, perpendicular to its wavefront.
+    size : (float, float), default=(1000, 1000)
+        The size of the image to generate for displaying the grating. Optional
+        If using a specific fov and ioa.
+    window : float, default=.2
+        The standard deviation of a kernal used for the gaussian window.
+    fov : float, default=180
+        The field of view that the grating occupies.
+    phase : float, default=0
+        The offset of the sine function when t=0.
+    ioa : float, default=None
+        An optional way of defining the image size using the FOV and inter-ommatidial
+        or -receptor angle. This supercedes the size parameter.
+    """
 
-
-        Parameters
-        ----------
-        sf : float, default=1
-            The number of oscillations from dark to light per degree 
-            (in cycles/degree).
-        tf : float, default=1
-            The number of oscillations from dark to light per second 
-            (in Hz) for a moving grating.
-        contrast : float, default=1
-            The Michelson contrast between the darkest and lightest values, 
-            amounting to the amplitude of the sinusoidal component.
-        orientation : float, default=0
-            The 2D orientation of the grating, perpendicular to its wavefront.
-        size : (float, float), default=(1000, 1000)
-            The size of the image to generate for displaying the grating. Optional
-            If using a specific fov and ioa.
-        window : float, default=.2
-            The standard deviation of a kernal used for the gaussian window.
-        fov : float, default=180
-            The field of view that the grating occupies.
-        phase : float, default=0
-            The offset of the sine function when t=0.
-        ioa : float, default=None
-            An optional way of defining the image size using the FOV and inter-ommatidial
-            or -receptor angle. This supercedes the size parameter.
-        """
+    def __init__(self, sf=1, tf=0, contrast=1, orientation=0, size=(1000, 1000),
+                 window=.2, fov=180, phase=0, ioa=None):
         # sf cyc/deg, oris in degs
         # self.sf = sf*fov*np.pi/(2*size[0])
         # ioa in rads
@@ -65,14 +68,6 @@ class Grating():
         self.make_img(phase)
 
     def make_img(self, t): 
-        """Generate the grating array.
-
-
-        Parameters
-        ----------
-        t : float or array-like
-            The time variable. Can be a single value or array of values.
-        """
         # x, y = np.meshgrid(range(size[0]), range(size[1]))
         x, y = np.meshgrid(np.linspace(0, self.fov, self.size[0]),
                            np.linspace(0, self.fov, self.size[0]))
@@ -87,7 +82,6 @@ class Grating():
             self.img = self.arr
        
     def gauss_window(self):
-        """Apply a gaussian window to self.img."""
         if self.window < 1:
             gwindow = np.meshgrid(
                 gaussian(self.size[0], self.window*self.size[0]),
@@ -98,16 +92,6 @@ class Grating():
         self.img = self.gwindow * self.arr
             
     def display(self, cmap='Greys', ax=None):
-        """Plot the array with pretty formatting to ax.
-
-
-        Parameters
-        ----------
-        cmap : str, default='Greys'
-            The pyplot colormap to use for displaying the grating. 
-        ax : pyplot.axis, default=None
-            The ax on which to plot the grating. If None, it uses plt.gca().
-        """
         deg = np.linspace(0, self.fov*180./np.pi, self.size[0])
         if self.fig is None:
             self.fig = plt.figure(figsize=(5,5))
@@ -132,6 +116,31 @@ class Grating():
 
 
 #3 different gratings with different contrasts and sfs
+fig = plt.figure(figsize=(5,5))
+i = 1
+cs = np.array([.1, .5, 1])
+# sfs = np.round(1/np.array([18, 36, 72]), 3)
+sfs = np.array([.01, .05, .1])
+for c in cs[::-1]:
+    for sf in sfs:
+        ax = plt.subplot(3, 3, i)
+        g = Grating(sf=sf, contrast=c, window=None)
+        g.fig = fig
+        g.display(ax=ax)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        if (i - 1)%3 == 0:
+            plt.ylabel(c)
+        if i > 6:
+            plt.xlabel(sf)
+        if i == 4:
+            plt.ylabel(f"Michelson Contrast\n{c}")
+        if i == 8:
+            plt.xlabel(f"{sf}\nSpatial Frequency\n(Cyc/°)")
+        i += 1
+#plt.suptitle("gratings vary by contrast and spatial frequency")
+plt.tight_layout()
+plt.show()
 
 def process_reciprocal(img, xvals, yvals, num_gratings=1):
     """Process grating information from the reciprocal image of an input array.
@@ -146,8 +155,7 @@ def process_reciprocal(img, xvals, yvals, num_gratings=1):
     yvals : array-like, shape=(height)
         The y-values for each row in img.
     num_gratings : int, default=1
-        The number of fundamental frequencies to check for. 
-        Half of the peaks to search for.
+        The number of fundamental frequencies to check for. Half of the peaks to search for.
     """
     # make a figure with 2x2 subplots
     fig, axes = plt.subplots(ncols=2, nrows=1, figsize=(10, 6))
@@ -258,8 +266,8 @@ def process_reciprocal(img, xvals, yvals, num_gratings=1):
     print(f"spatial frequency=\t{spatial_freq_peaks}")
     print(f"orientation=\t\t{orientations*180/np.pi}")
 
-def process_reciprocal_smooth(img, xvals, yvals, num_gratings=1):
-    """Process grating information from the 2D autocorrelated reciprocal image.
+    def process_reciprocal_smooth(img, xvals, yvals, num_gratings=1):
+    """Process grating information from the reciprocal image of an input array.
     
     
     Parameters
@@ -271,8 +279,7 @@ def process_reciprocal_smooth(img, xvals, yvals, num_gratings=1):
     yvals : array-like, shape=(height)
         The y-values for each row in img.
     num_gratings : int, default=1
-        The number of fundamental frequencies to check for. 
-        Half of the peaks to search for.
+        The number of fundamental frequencies to check for. Half of the peaks to search for.
     """
     # make a figure with 2x2 subplots
     fig, axes = plt.subplots(ncols=2, nrows=1, figsize=(10, 6))
