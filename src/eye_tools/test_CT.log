@@ -1,0 +1,12 @@
+The following datasets were found for this stack:
+1. Stack
+2. Cross-sections
+3. Cluster labels
+4. Ommatidial data
+5. Interommatidial data
+Enter the number [1, 2, 3, 4, 5] to load from that stage and continue processing or press 0 to start over: Traceback (most recent call last):
+  File "test_CT.py", line 20, in <module>
+    ct_stack.ommatidia_detecting_algorithm(
+  File "/home/pbl/Desktop/programs/eye_tools/eye_tools/analysis_tools.py", line 4299, in ommatidia_detecting_algorithm
+    stage = input(
+KeyboardInterrupt
