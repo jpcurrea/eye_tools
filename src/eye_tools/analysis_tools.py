@@ -21,6 +21,8 @@ Stack
     A stack of images at different depths for making a focus stack.
 EyeStack
     A special stack for handling a focus stack of fly eye images.
+CTStack
+    A special stack for handling a CT stack of compound eyes.
 
 Functions
 ---------
@@ -524,6 +526,8 @@ class SphereFit():
         self.polar = np.array([inclination, azimuth, radius]).T
 
 
+
+
 def colorbar_histogram(colorvals, vmin, vmax, ax=None, bin_number=100,
                        fill_color='k', line_color='w', colormap='viridis'):
     """Plot a colorbar with a histogram skyline superimposed.
@@ -555,7 +559,7 @@ def colorbar_histogram(colorvals, vmin, vmax, ax=None, bin_number=100,
     if not isinstance(colorvals, np.ndarray):
         colorvals = np.asarray(colorvals)
     # use evenly spaced bins and counts
-    bins = np.linspace(colorvals.min(), colorvals.max(), bin_number + 1)
+    bins = np.linspace(vmin, vmax, bin_number + 1)
     counts, bin_edges = np.histogram(colorvals, bins=bins)
     # use seaborn distplot to get a histogram skyline
     # histogram = sbn.distplot(colorvals, kde=False, color=fill_color,
@@ -1859,7 +1863,7 @@ class Eye(Layer):
         return self.eye
 
     def get_ommatidia(self, bright_peak=True, fft_smoothing=5,
-                      square_lattice=False, high_pass=False):
+                      square_lattice=False, high_pass=False, regular=True):
         """Detect ommatidia coordinates assuming hex or square lattice.
 
 
@@ -1879,6 +1883,8 @@ class Eye(Layer):
             Whether this a square (rather than a hexagonal) lattice.
         high_pass : bool, default=False
             Whether to also filter frequencies below the fundamental one.
+        regular : bool, default=False
+            Whether to assume the ommatidial lattice is approximately regular.
         
         Atributes
         ---------
@@ -1920,75 +1926,103 @@ class Eye(Layer):
             f"first run {self.get_eye_dimensions}")
         # get the reciprocal image using the FFT
         # first, get the 2D FFT
-        image_bw_centered = self.image_bw - self.image_bw[self.mask].mean()
+        image_bw_centered = self.image_bw - self.image_bw.mean()
         height, width = image_bw_centered.shape
         # todo: try adding a gaussian window
-        window_h = signal.windows.gaussian(height, height/5)
-        window_w = signal.windows.gaussian(width, height/5)
+        window_h = signal.windows.gaussian(height, height/3)
+        window_w = signal.windows.gaussian(width, height/3)
         window = window_w[np.newaxis, :] * window_h[:, np.newaxis]
         image_windowed = image_bw_centered * window
         fft = np.fft.fft2(image_windowed)
+        # fft = np.fft.fft2(image_bw_centered)
         # shift frequencies so that low frequencies are central and high
         # frequencies are peripheral
         fft_shifted = np.fft.fftshift(fft)
         # calculate reciprocal frequencies using their distance to the center
-        self.__freqs = np.array(np.meshgrid(
-            np.fft.fftfreq(self.image_bw.shape[1], self.pixel_size),
-            np.fft.fftfreq(self.image_bw.shape[0], self.pixel_size)))
+        xfreqs = np.fft.fftfreq(self.image_bw.shape[1], self.pixel_size)
+        yfreqs = np.fft.fftfreq(self.image_bw.shape[0], self.pixel_size)
+        xgrid, ygrid = np.meshgrid(xfreqs, yfreqs)
+        self.__freqs = np.array([xgrid, ygrid])
         self.__freqs = np.array(self.__freqs, dtype=float)
         self.__freqs = np.fft.fftshift(self.__freqs)
+        self.__xfreqs = np.fft.fftshift(xfreqs)
+        self.__yfreqs = np.fft.fftshift(yfreqs)
         # calculate grating orientations for the reciprocal image
         self.__orientations = np.arctan2(self.__freqs[1], self.__freqs[0])
         self.__freqs = np.linalg.norm(self.__freqs, axis=0)
         i = self.__orientations < 0    # indices of the negative half
         self.__orientations[i] = self.__orientations[i] + np.pi # make positive
+        # different method for regular and irregular lattices
         # the reciprocal image is the magnitude of the frequency shifted 2D FFT
         self.reciprocal = abs(fft_shifted)
-        # remove the low frequency gratings corresponding to the horizontal
-        # and vertical limits of the image by replacing with the mean
-        # midv, midh = np.round(np.array(self.__reciprocal.shape)/2).astype(int)
-        # pad = 2
-        # newv = self.__reciprocal[[midv-pad, midv+pad]].mean(0)
-        # newh = self.__reciprocal[:, [midh-pad, midh+pad]].mean(1)
-        # self.__reciprocal[midv - (pad - 1): midv + pad] = newv[np.newaxis]
-        # self.__reciprocal[:, midh - (pad - 1): midh +
-        #            pad] = newh[:, np.newaxis]
-        # apply a guassian blur to exclude the effect of noise
-        # self.__reciprocal = ndimage.gaussian_filter(
-        #     self.__freqs * self.__reciprocal, sigma=fft_smoothing)
         height, width = self.reciprocal.shape
         # instead of blurring, just use the autocorrelation
-        self.reciprocal = signal.correlate(
-            self.reciprocal, self.reciprocal, mode='same', method='fft')
-        # find the peaks of the upper half of the reciprocal image
-        peaks = peak_local_max(
-            self.reciprocal[:round(height/2)], num_peaks=3)
-        ys, xs = peaks.T
-        peak_vals = self.reciprocal[ys, xs]
-        order = np.argsort(peak_vals)[::-1]
-        xs = xs[order]
-        ys = ys[order]
-        # TODO: fix this until it works
-        # remove any key frequencies that are too low
-        key_freqs = self.__freqs[:round(height/2)][ys, xs]
-        key_freqs = key_freqs[key_freqs > .01]
-        i = np.argsort(key_freqs)
-        if square_lattice:
-            # if square, use the 2 fundamental frequencies
-            self.__fundamental_frequencies = key_freqs[i][:2]
+        if regular:
+            self.reciprocal = signal.correlate(
+                self.reciprocal, self.reciprocal, mode='same', method='fft')
+            # find the peaks of the upper half of the reciprocal image
+            pos_freqs = self._Eye__freqs > 0
+            thresh = 2 * self._Eye__freqs[pos_freqs].min()
+            # # TODO: non-linearly fit lattice to peaks instead of finding maxima
+            # lattice_fit = LatticeFit(self.reciprocal, self.__xfreqs, self.__yfreqs)
+            # lattice_fit.error()
+            # breakpoint()
+            # peaks = peak_local_max(
+            #     self.reciprocal[:round(height/2)], num_peaks=4, min_distance=3)
+            peaks = peak_local_max(
+                self.reciprocal, num_peaks=10, min_distance=3)
+            ys, xs = peaks.T
+            key_freqs = self._Eye__freqs[ys, xs]
+            # the center is distinct in that it has a frequency ~ 0 and isn't duplicated
+            thresh = 3 * np.unique(self._Eye__freqs)[1]
+            include = key_freqs > thresh
+            key_freqs = key_freqs[include]  # omit very small freqs
+            # remove those without duplicates
+            key_freq_set, counts = np.unique(key_freqs, return_counts=True)
+            include = counts > 1
+            key_freqs = key_freq_set[include]
+            # use those with highest values
+            i = np.argsort(key_freqs)
+            if square_lattice:
+                # if square, use the 2 fundamental frequencies
+                self.__fundamental_frequencies = key_freqs[i][:2]
+            else:
+                # if hexagonal, use the 3 fundamental frequencies
+                self.__fundamental_frequencies = key_freqs[i][:3]
         else:
-            # if hexagonal, use the 3 fundamental frequencies
-            self.__fundamental_frequencies = key_freqs[i][:3]
+            # for irregular lattices, we can collapse the 2D reciprocal image
+            # into a 1D frequency response curve. The fundamental frequency
+            # is just the second peak in this curve
+            product = self.reciprocal * self._Eye__freqs  # normalized by frequency
+            # use frequency values to find mean power function
+            freqs = self._Eye__freqs.flatten()
+            power = self.reciprocal.flatten()
+            power_normalized = product.flatten()
+            # for each frequency
+            hist, xvals, yvals = np.histogram2d(freqs, power_normalized, bins=100)
+            # get middle points of bin values for plotting point estimates
+            xs = (xvals[:-1] + xvals[:-1])/2
+            ys = (yvals[:-1] + yvals[:-1])/2
+            # iterate through each column and measure weighted mean of power
+            weighted_means = []
+            for col in hist:
+                weighted_means += [sum(col * ys / col.sum())]
+            weighted_means = np.array(weighted_means)
+            plt.pcolormesh(xvals, yvals, hist.T, cmap='Greys')
+            plt.plot(xs, weighted_means)
+            # find the frequency corresponding to the maximum power
+            peak_frequency = xs[np.argmax(weighted_means)]
+            self.__fundamental_frequencies = np.array([peak_frequency])
         # set the upper bound as halfway between the fundamental frequency
         # and the next harmonic
-        self.__upper_bound = 1.25 * self.__fundamental_frequencies.max()
+        self.__upper_bound = 2 * self.__fundamental_frequencies.max()
         # make a 2D image to filter only frequencies less than the upper bound
         in_range = self.__freqs < self.__upper_bound
         self.__low_pass_filter = np.ones(self.__freqs.shape)
         self.__low_pass_filter[in_range == False] = 0
         # if we also want to apply a high pass filter:
         if high_pass:
-            in_range = self.__freqs < .75 * self.__fundamental_frequencies.min()
+            in_range = self.__freqs < .5 * self.__fundamental_frequencies.min()
             self.__low_pass_filter[in_range] = 0
         # apply the low pass filter and then invert back to the filtered image
         self.__fft_shifted = np.zeros(fft.shape, dtype=complex)
@@ -2063,7 +2097,7 @@ class Eye(Layer):
     def ommatidia_detecting_algorithm(self, bright_peak=True, fft_smoothing=5,
                                       square_lattice=False, high_pass=False,
                                       num_neighbors=3, sample_size=100,
-                                      plot=False, plot_fn=None):
+                                      plot=False, plot_fn=None, regular=True):
         """The complete algorithm for measuring ommatidia in images.
 
         
@@ -2089,6 +2123,8 @@ class Eye(Layer):
         plot_fn : str, default=None
             Filename to save the plotted eye with superimposed ommatidia and 
             their diameters.
+        regular : bool, default=False
+            Whether to assume the ommatidial lattice is approximately regular.
 
         Attributes
         ----------
@@ -2120,7 +2156,7 @@ class Eye(Layer):
         self.get_ommatidia(bright_peak=bright_peak,
                            fft_smoothing=fft_smoothing,
                            square_lattice=square_lattice,
-                           high_pass=high_pass)
+                           high_pass=high_pass, regular=regular)
         # and measure ommatidial diameters
         self.measure_ommatidia(num_neighbors=num_neighbors,
                                sample_size=sample_size)
@@ -4032,8 +4068,6 @@ class CTStack(Stack):
                 inds = []
                 for pair, lbls in zip(axes_new, labels_in_slice):
                     angle = angle_between(pair[0], pair[1])
-                    # if angle > np.pi/2:
-                    #     breakpoint()
                     # find the row in dataset corresponding to this pair
                     lbl1, lbl2 = lbls
                     i = interommatidial_data.lbl1.values == lbl1
