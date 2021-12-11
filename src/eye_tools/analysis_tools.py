@@ -34,7 +34,7 @@ Note: for cropping, first load the mask
 
 """
 import h5py
-from .interfaces import *
+from interfaces import *
 import math
 import matplotlib
 import numpy as np
@@ -2015,14 +2015,14 @@ class Eye(Layer):
             self.__fundamental_frequencies = np.array([peak_frequency])
         # set the upper bound as halfway between the fundamental frequency
         # and the next harmonic
-        self.__upper_bound = 2 * self.__fundamental_frequencies.max()
+        self.__upper_bound = 1.25 * self.__fundamental_frequencies.max()
         # make a 2D image to filter only frequencies less than the upper bound
         in_range = self.__freqs < self.__upper_bound
         self.__low_pass_filter = np.ones(self.__freqs.shape)
         self.__low_pass_filter[in_range == False] = 0
         # if we also want to apply a high pass filter:
         if high_pass:
-            in_range = self.__freqs < .5 * self.__fundamental_frequencies.min()
+            in_range = self.__freqs < .75 * self.__fundamental_frequencies.min()
             self.__low_pass_filter[in_range] = 0
         # apply the low pass filter and then invert back to the filtered image
         self.__fft_shifted = np.zeros(fft.shape, dtype=complex)
@@ -2182,7 +2182,12 @@ class Eye(Layer):
             img_ax.imshow(self.image_bw, cmap='gray')
             dot_radii = (self.ommatidial_diameters / (2 * self.pixel_size))
             dot_areas = np.pi * dot_radii ** 2
-            img_ax.scatter(xs, ys, marker='.', c=colorvals, s=.5 * dot_areas,
+            # img_ax.scatter(xs, ys, marker='.', c=colorvals, s=.5 * dot_areas,
+            #                # vmin=colorvals.min(), vmax=colorvals.max(),
+            #                vmin=vmin, vmax=vmax,
+            #                cmap='plasma')
+            # Keep dots the same size until we get this to work better
+            img_ax.scatter(xs, ys, marker='.', c=colorvals,
                            # vmin=colorvals.min(), vmax=colorvals.max(),
                            vmin=vmin, vmax=vmax,
                            cmap='plasma')

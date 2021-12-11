@@ -29,7 +29,6 @@ src/eye_tools/__main__.py
 src/eye_tools/analysis_tools.py
 src/eye_tools/interfaces.py
 src/eye_tools/lattice_builder.py
-src/eye_tools/interfaces/__init__.py
 tests/002.jpg
 tests/002.memmap
 tests/002_ommatidia.svg
