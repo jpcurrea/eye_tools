@@ -2184,34 +2184,35 @@ class Eye(Layer):
             img_ax = fig.add_subplot(gridspec[0, 0])
             colorbar_ax = fig.add_subplot(gridspec[0, 1])
             # plot the eye image with ommatidia superimposed
-            colorvals = self.ommatidial_diameters
-            vmin, vmax = np.percentile(colorvals, [.5, 99.5]) # use 99%
-            ys, xs = self.ommatidial_inds.T
             img_ax.imshow(self.image_bw, cmap='gray')
-            dot_radii = (self.ommatidial_diameters / (2 * self.pixel_size))
-            dot_areas = np.pi * dot_radii ** 2
             # img_ax.scatter(xs, ys, marker='.', c=colorvals, s=.5 * dot_areas,
             #                # vmin=colorvals.min(), vmax=colorvals.max(),
             #                vmin=vmin, vmax=vmax,
             #                cmap='plasma')
-            # Keep dots the same size until we get this to work better
-            img_ax.scatter(xs, ys, marker='.', c=colorvals,
-                           # vmin=colorvals.min(), vmax=colorvals.max(),
-                           vmin=vmin, vmax=vmax,
-                           cmap='plasma')
             img_ax.set_xticks([])
             img_ax.set_yticks([])
-            # crop image around the x and y coordinates, with .1 padding
-            width = xs.max() - xs.min()
-            height = ys.max() - ys.min()
-            xpad, ypad = .05 * width, .05 * height
-            img_ax.set_xlim(xs.min() - xpad, xs.max() + xpad)
-            img_ax.set_ylim(ys.max() + ypad, ys.min() - ypad)
-            # make the colorbar
-            # colorbar_histogram(colorvals, colorvals.min(), colorvals.max(),
-            colorbar_histogram(colorvals, vmin, vmax,
-                               ax=colorbar_ax, bin_number=25, colormap='plasma')
-            colorbar_ax.set_ylabel(f"Ommatidial Diameter (N={len(xs)})",
+            # Keep dots the same size until we get this to work better
+            if len(self.ommatidia) > 0:
+                dot_radii = (self.ommatidial_diameters / (2 * self.pixel_size))
+                dot_areas = np.pi * dot_radii ** 2
+                colorvals = self.ommatidial_diameters
+                vmin, vmax = np.percentile(colorvals, [.5, 99.5]) # use 99%
+                ys, xs = self.ommatidial_inds.T
+                img_ax.scatter(xs, ys, marker='.', c=colorvals,
+                               # vmin=colorvals.min(), vmax=colorvals.max(),
+                               vmin=vmin, vmax=vmax,
+                               cmap='plasma')
+                # crop image around the x and y coordinates, with .1 padding
+                width = xs.max() - xs.min()
+                height = ys.max() - ys.min()
+                xpad, ypad = .05 * width, .05 * height
+                img_ax.set_xlim(xs.min() - xpad, xs.max() + xpad)
+                img_ax.set_ylim(ys.max() + ypad, ys.min() - ypad)
+                # make the colorbar
+                # colorbar_histogram(colorvals, colorvals.min(), colorvals.max(),
+                colorbar_histogram(colorvals, vmin, vmax,
+                                   ax=colorbar_ax, bin_number=25, colormap='plasma')
+            colorbar_ax.set_ylabel(f"Ommatidial Diameter (N={len(self.ommatidia)})",
                                    rotation=270)
             colorbar_ax.get_yaxis().labelpad = 15
             fig.tight_layout()
