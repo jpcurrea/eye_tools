@@ -2013,38 +2013,46 @@ class Eye(Layer):
             # find the frequency corresponding to the maximum power
             peak_frequency = xs[np.argmax(weighted_means)]
             self.__fundamental_frequencies = np.array([peak_frequency])
-        # set the upper bound as halfway between the fundamental frequency
-        # and the next harmonic
-        self.__upper_bound = 1.25 * self.__fundamental_frequencies.max()
-        # make a 2D image to filter only frequencies less than the upper bound
-        in_range = self.__freqs < self.__upper_bound
-        self.__low_pass_filter = np.ones(self.__freqs.shape)
-        self.__low_pass_filter[in_range == False] = 0
-        # if we also want to apply a high pass filter:
-        if high_pass:
-            in_range = self.__freqs < .75 * self.__fundamental_frequencies.min()
-            self.__low_pass_filter[in_range] = 0
-        # apply the low pass filter and then invert back to the filtered image
-        self.__fft_shifted = np.zeros(fft.shape, dtype=complex)
-        self.__fft_shifted[:] = fft_shifted * self.__low_pass_filter
-        self.__fft = np.fft.ifftshift(self.__fft_shifted)
-        self.filtered_image = np.fft.ifft2(self.__fft).real
-        # use a minimum distance based on the wavelength of the
-        # fundamental grating
-        self.ommatidial_diameter_fft = 1 / self.__fundamental_frequencies.mean()
-        dist = self.ommatidial_diameter_fft / self.pixel_size
-        dist /= 3
-        smooth_surface = self.filtered_image
-        if not bright_peak:
-            smooth_surface = smooth_surface.max() - smooth_surface
-        self.ommatidial_inds = peak_local_max(
-            smooth_surface, min_distance=int(round(dist)),
-            exclude_border=False)
-        # remove points outside of the mask
-        ys, xs = self.ommatidial_inds.T
-        self.ommatidial_inds = self.ommatidial_inds[self.mask[ys, xs]]
-        # store ommatidia coordinates in terms of the pixel size
-        self.ommatidia = self.ommatidial_inds * self.pixel_size
+        if len(self.__fundamental_frequencies) > 0:
+            # set the upper bound as halfway between the fundamental frequency
+            # and the next harmonic
+            self.__upper_bound = 1.25 * self.__fundamental_frequencies.max()
+            # make a 2D image to filter only frequencies less than the upper bound
+            in_range = self.__freqs < self.__upper_bound
+            self.__low_pass_filter = np.ones(self.__freqs.shape)
+            self.__low_pass_filter[in_range == False] = 0
+            # if we also want to apply a high pass filter:
+            if high_pass:
+                in_range = self.__freqs < .75 * self.__fundamental_frequencies.min()
+                self.__low_pass_filter[in_range] = 0
+            # apply the low pass filter and then invert back to the filtered image
+            self.__fft_shifted = np.zeros(fft.shape, dtype=complex)
+            self.__fft_shifted[:] = fft_shifted * self.__low_pass_filter
+            self.__fft = np.fft.ifftshift(self.__fft_shifted)
+            self.filtered_image = np.fft.ifft2(self.__fft).real
+            # use a minimum distance based on the wavelength of the
+            # fundamental grating
+            self.ommatidial_diameter_fft = 1 / self.__fundamental_frequencies.mean()
+            dist = self.ommatidial_diameter_fft / self.pixel_size
+            dist /= 3
+            smooth_surface = self.filtered_image
+            if not bright_peak:
+                smooth_surface = smooth_surface.max() - smooth_surface
+            self.ommatidial_inds = peak_local_max(
+                smooth_surface, min_distance=int(round(dist)),
+                exclude_border=False)
+            # remove points outside of the mask
+            ys, xs = self.ommatidial_inds.T
+            self.ommatidial_inds = self.ommatidial_inds[self.mask[ys, xs]]
+            # store ommatidia coordinates in terms of the pixel size
+            self.ommatidia = self.ommatidial_inds * self.pixel_size
+        else:
+            print("Failed to find fundamental frequencies.")
+            self.filtered_image = np.copy(self.image)
+            self.ommatidial_diameter_fft = 0
+            self.ommatidial_inds = np.array([])
+            self.ommatidia = np.array([])
+            
 
     def measure_ommatidia(self, num_neighbors=3, sample_size=100):
         """Measure ommatidial diameter using the ommatidia coordinates.
