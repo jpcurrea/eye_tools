@@ -2049,7 +2049,7 @@ class Eye(Layer):
         else:
             print("Failed to find fundamental frequencies.")
             self.filtered_image = np.copy(self.image)
-            self.ommatidial_diameter_fft = 0
+            self.ommatidial_diameter_fft = np.nan
             self.ommatidial_inds = np.array([])
             self.ommatidia = np.array([])
             
@@ -2085,22 +2085,26 @@ class Eye(Layer):
         """
         assert self.ommatidia is not None, (
             f"first run {self.get_ommatidia}")
-        # make a k-dimensional tree
-        self.__ommatidial_dists_tree = spatial.KDTree(self.ommatidia)
-        # find the set of nearest neighbors
-        self.__ommatidial_dists , inds = self.__ommatidial_dists_tree.query(
-            self.ommatidia, k=num_neighbors+1)
-        self.ommatidial_diameters = self.__ommatidial_dists[:, 1:].mean(1)
-        # use ommatidia center of mass to grab ommatidia near the center
-        com = self.ommatidia.mean(0)
-        near_dists, near_center = self.__ommatidial_dists_tree.query(
-            com, k=sample_size)
-        near_dists, near_center = self._Eye__ommatidial_dists_tree.query(
-            com, k=sample_size)
-        near_center = near_center[near_dists < np.inf]
-        # store the mean and standard deviation of the sample
-        self.ommatidial_diameter = self.ommatidial_diameters[near_center].mean()
-        self.ommatidial_diameter_SD = self.ommatidial_diameters[near_center].std()
+        if len(self.ommatidia) > 0:
+            # make a k-dimensional tree
+            self.__ommatidial_dists_tree = spatial.KDTree(self.ommatidia)
+            # find the set of nearest neighbors
+            self.__ommatidial_dists , inds = self.__ommatidial_dists_tree.query(
+                self.ommatidia, k=num_neighbors+1)
+            self.ommatidial_diameters = self.__ommatidial_dists[:, 1:].mean(1)
+            # use ommatidia center of mass to grab ommatidia near the center
+            com = self.ommatidia.mean(0)
+            near_dists, near_center = self.__ommatidial_dists_tree.query(
+                com, k=sample_size)
+            near_dists, near_center = self._Eye__ommatidial_dists_tree.query(
+                com, k=sample_size)
+            near_center = near_center[near_dists < np.inf]
+            # store the mean and standard deviation of the sample
+            self.ommatidial_diameter = self.ommatidial_diameters[near_center].mean()
+            self.ommatidial_diameter_SD = self.ommatidial_diameters[near_center].std()
+        else:
+            self.ommatidial_diameter = np.nan
+            self.ommatidial_diameter_SD = np.nan
 
     def ommatidia_detecting_algorithm(self, bright_peak=True, fft_smoothing=5,
                                       square_lattice=False, high_pass=False,
