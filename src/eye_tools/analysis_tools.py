@@ -2197,7 +2197,7 @@ class Eye(Layer):
             colorbar_ax = fig.add_subplot(gridspec[0, 1])
             # plot the eye image with ommatidia superimposed
             img_ax.imshow(self.image_bw, cmap='gray',
-                          vmin=0, vmax=np.iinfo(self.image_bw.dtype).max)
+                          vmin=0, vmax=np.iinfo(self.image.dtype).max)
             # img_ax.scatter(xs, ys, marker='.', c=colorvals, s=.5 * dot_areas,
             #                # vmin=colorvals.min(), vmax=colorvals.max(),
             #                vmin=vmin, vmax=vmax,
