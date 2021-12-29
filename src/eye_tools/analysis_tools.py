@@ -552,7 +552,7 @@ def colorbar_histogram(colorvals, vmin, vmax, ax=None, bin_number=100,
     colormap : matplotlib colormap, default='viridis'
         Colormap of colorvals to colors.
     """
-    assert (vmin < np.inf) and (vmax < np.inf), (
+    assert all([vmin < np.inf, vmax < np.inf, not np.isnan(vmin), not np.isnan(vmax)]), (
         "Input vmin and vmax should be finite floats")
     if ax is None:
         ax = plt.gca()
@@ -1993,13 +1993,13 @@ class Eye(Layer):
             # for irregular lattices, we can collapse the 2D reciprocal image
             # into a 1D frequency response curve. The fundamental frequency
             # is just the second peak in this curve
-            product = self.reciprocal * self._Eye__freqs  # normalized by frequency
+            # product = self.reciprocal * self._Eye__freqs  # normalized by frequency
+            product = np.log(self.reciprocal)
             # use frequency values to find mean power function
             freqs = self._Eye__freqs.flatten()
-            power = self.reciprocal.flatten()
             power_normalized = product.flatten()
             # for each frequency
-            hist, xvals, yvals = np.histogram2d(freqs, power_normalized, bins=100)
+            hist, xvals, yvals = np.histogram2d(freqs, power_normalized, bins=50)
             # get middle points of bin values for plotting point estimates
             xs = (xvals[:-1] + xvals[:-1])/2
             ys = (yvals[:-1] + yvals[:-1])/2
@@ -2008,12 +2008,21 @@ class Eye(Layer):
             for col in hist:
                 weighted_means += [sum(col * ys / col.sum())]
             weighted_means = np.array(weighted_means)
-            plt.pcolormesh(xvals, yvals, hist.T, cmap='Greys')
-            plt.plot(xs, weighted_means)
+            # plt.pcolormesh(xvals, yvals, hist.T, cmap='Greys')
+            # plt.plot(xs, weighted_means)
             # find the frequency corresponding to the maximum power
-            peak_frequency = xs[np.argmax(weighted_means)]
-            self.__fundamental_frequencies = np.array([peak_frequency])
-        if len(self.__fundamental_frequencies) > 0:
+            xmax = peak_local_max(weighted_means, num_peaks=1)
+            if len(xmax) > 0:
+                xmax = xmax[0][0]
+                peak_frequency = xs[xmax]
+                self.__fundamental_frequencies = np.array([peak_frequency])
+            else:
+                self.__fundamental_frequencies = np.array([])
+        # use a minimum distance based on the wavelength of the
+        # fundamental grating
+        self.ommatidial_diameter_fft = 1 / self.__fundamental_frequencies.mean()
+        dist = self.ommatidial_diameter_fft / self.pixel_size
+        if len(self.__fundamental_frequencies) > 0 and (dist > 2):
             # set the upper bound as halfway between the fundamental frequency
             # and the next harmonic
             self.__upper_bound = 1.25 * self.__fundamental_frequencies.max()
@@ -2030,25 +2039,24 @@ class Eye(Layer):
             self.__fft_shifted[:] = fft_shifted * self.__low_pass_filter
             self.__fft = np.fft.ifftshift(self.__fft_shifted)
             self.filtered_image = np.fft.ifft2(self.__fft).real
-            # use a minimum distance based on the wavelength of the
-            # fundamental grating
-            self.ommatidial_diameter_fft = 1 / self.__fundamental_frequencies.mean()
-            dist = self.ommatidial_diameter_fft / self.pixel_size
-            dist /= 3
             smooth_surface = self.filtered_image
             if not bright_peak:
                 smooth_surface = smooth_surface.max() - smooth_surface
             self.ommatidial_inds = peak_local_max(
-                smooth_surface, min_distance=int(round(dist)),
-                exclude_border=False)
+                smooth_surface, min_distance=int(round(dist/4)),
+                exclude_border=False, threshold_abs=1)
             # remove points outside of the mask
             ys, xs = self.ommatidial_inds.T
             self.ommatidial_inds = self.ommatidial_inds[self.mask[ys, xs]]
+            if len(self.ommatidial_inds) > 5000:
+                breakpoint()
             # store ommatidia coordinates in terms of the pixel size
             self.ommatidia = self.ommatidial_inds * self.pixel_size
         else:
             print("Failed to find fundamental frequencies.")
-            self.filtered_image = np.copy(self.image)
+            empty_img = np.copy(self.image)
+            empty_img[:] = empty_img.mean().astype('uint8')
+            self.filtered_image = np.copy(empty_img)
             self.ommatidial_diameter_fft = np.nan
             self.ommatidial_inds = np.array([])
             self.ommatidia = np.array([])
@@ -2188,7 +2196,8 @@ class Eye(Layer):
             img_ax = fig.add_subplot(gridspec[0, 0])
             colorbar_ax = fig.add_subplot(gridspec[0, 1])
             # plot the eye image with ommatidia superimposed
-            img_ax.imshow(self.image_bw, cmap='gray')
+            img_ax.imshow(self.image_bw, cmap='gray',
+                          vmin=0, vmax=np.iinfo(self.image_bw.dtype).max)
             # img_ax.scatter(xs, ys, marker='.', c=colorvals, s=.5 * dot_areas,
             #                # vmin=colorvals.min(), vmax=colorvals.max(),
             #                vmin=vmin, vmax=vmax,
@@ -2207,6 +2216,7 @@ class Eye(Layer):
                                vmin=vmin, vmax=vmax,
                                cmap='plasma')
                 # crop image around the x and y coordinates, with .1 padding
+                ys, xs = np.where(self.mask)
                 width = xs.max() - xs.min()
                 height = ys.max() - ys.min()
                 xpad, ypad = .05 * width, .05 * height
@@ -2214,8 +2224,9 @@ class Eye(Layer):
                 img_ax.set_ylim(ys.max() + ypad, ys.min() - ypad)
                 # make the colorbar
                 # colorbar_histogram(colorvals, colorvals.min(), colorvals.max(),
-                colorbar_histogram(colorvals, vmin, vmax,
-                                   ax=colorbar_ax, bin_number=25, colormap='plasma')
+                if not any([np.isnan(vmin), np.isnan(vmax), np.isinf(vmin), np.isinf(vmax)]): 
+                    colorbar_histogram(colorvals, vmin, vmax,
+                                       ax=colorbar_ax, bin_number=25, colormap='plasma')
             colorbar_ax.set_ylabel(f"Ommatidial Diameter (N={len(self.ommatidia)})",
                                    rotation=270)
             colorbar_ax.get_yaxis().labelpad = 15
