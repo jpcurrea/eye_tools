@@ -22,7 +22,6 @@ examples/desktop.ini
 src/compound_eye_tools.egg-info/PKG-INFO
 src/compound_eye_tools.egg-info/SOURCES.txt
 src/compound_eye_tools.egg-info/dependency_links.txt
-src/compound_eye_tools.egg-info/desktop.ini
 src/compound_eye_tools.egg-info/top_level.txt
 src/eye_tools/__init__.py
 src/eye_tools/__main__.py
